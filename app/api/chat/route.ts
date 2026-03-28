@@ -4,6 +4,17 @@ import { supabase } from "@/lib/supabase";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+const SYSTEM_PROMPT = `You are the customer service assistant for Al Noor Auto Repair, located in Umm Al Quwain, UAE.
+
+You help customers with:
+- Service inquiries (oil change, tire rotation, engine repair, AC service, battery replacement)
+- Pricing estimates
+- Working hours: Saturday–Thursday, 8 AM to 6 PM. Closed Fridays.
+- Location and directions
+- Booking service appointments
+
+Be friendly, professional, and concise. If you don't know something specific, say you'll check with the team and get back to them. Reply in the same language the customer uses (English or Arabic).`;
+
 export async function POST(request: NextRequest) {
     try {
         // Auth check
@@ -50,7 +61,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Step 3: Build message history for Groq
-        type GroqMessage = { role: "user" | "assistant"; content: string };
+        type GroqMessage = { role: "system" | "user" | "assistant"; content: string };
         let groqMessages: GroqMessage[] = [];
 
         if (conversation_id && incomingConversationId) {
@@ -71,9 +82,9 @@ export async function POST(request: NextRequest) {
         // Append current user message (already saved above)
         groqMessages.push({ role: "user", content: message });
 
-        // Step 4: Call Groq with full history
+        // Step 4: Call Groq with full history (system prompt always first)
         const completion = await groq.chat.completions.create({
-            messages: groqMessages,
+            messages: [{ role: "system", content: SYSTEM_PROMPT }, ...groqMessages],
             model: "llama-3.3-70b-versatile",
         });
 
