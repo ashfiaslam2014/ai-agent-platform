@@ -6,6 +6,14 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export async function POST(request: NextRequest) {
     try {
+        // Auth check
+        const authHeader = request.headers.get("authorization");
+        const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+        if (!token || token !== process.env.API_SECRET_KEY) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         const { message, conversation_id: incomingConversationId } = await request.json();
 
         if (!message) {
