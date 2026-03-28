@@ -4,16 +4,7 @@ import { supabase } from "@/lib/supabase";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const SYSTEM_PROMPT = `You are the customer service assistant for Al Noor Auto Repair, located in Umm Al Quwain, UAE.
-
-You help customers with:
-- Service inquiries (oil change, tire rotation, engine repair, AC service, battery replacement)
-- Pricing estimates
-- Working hours: Saturday–Thursday, 8 AM to 6 PM. Closed Fridays.
-- Location and directions
-- Booking service appointments
-
-Be friendly, professional, and concise. If you don't know something specific, say you'll check with the team and get back to them. Reply in the same language the customer uses (English or Arabic).`;
+const FALLBACK_SYSTEM_PROMPT = "You are a helpful assistant.";
 
 export async function POST(request: NextRequest) {
     try {
@@ -34,13 +25,23 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Step 1: Resolve conversation_id
+        // Step 1: Resolve conversation_id and business_id
         let conversation_id: string = incomingConversationId ?? null;
+        let business_id: string | null = null;
 
         if (!conversation_id) {
+            // Default new conversations to the first business
+            const { data: firstBusiness } = await supabase
+                .from("businesses")
+                .select("id")
+                .limit(1)
+                .single();
+
+            business_id = firstBusiness?.id ?? null;
+
             const { data, error } = await supabase
                 .from("conversations")
-                .insert({})
+                .insert({ business_id })
                 .select("id")
                 .single();
 
@@ -49,6 +50,15 @@ export async function POST(request: NextRequest) {
             } else {
                 conversation_id = data.id;
             }
+        } else {
+            // Load business_id from existing conversation
+            const { data: convo } = await supabase
+                .from("conversations")
+                .select("business_id")
+                .eq("id", conversation_id)
+                .single();
+
+            business_id = convo?.business_id ?? null;
         }
 
         // Step 2: Save user message
@@ -82,15 +92,31 @@ export async function POST(request: NextRequest) {
         // Append current user message (already saved above)
         groqMessages.push({ role: "user", content: message });
 
-        // Step 4: Call Groq with full history (system prompt always first)
+        // Step 4: Fetch system prompt from businesses table
+        let systemPrompt = FALLBACK_SYSTEM_PROMPT;
+        if (business_id) {
+            const { data: business, error: businessError } = await supabase
+                .from("businesses")
+                .select("system_prompt")
+                .eq("id", business_id)
+                .single();
+
+            if (businessError) {
+                console.error("Failed to fetch business prompt:", businessError);
+            } else if (business?.system_prompt) {
+                systemPrompt = business.system_prompt;
+            }
+        }
+
+        // Step 5: Call Groq with full history (system prompt always first)
         const completion = await groq.chat.completions.create({
-            messages: [{ role: "system", content: SYSTEM_PROMPT }, ...groqMessages],
+            messages: [{ role: "system", content: systemPrompt }, ...groqMessages],
             model: "llama-3.3-70b-versatile",
         });
 
         const response = completion.choices[0]?.message?.content || "";
 
-        // Step 5: Save assistant message
+        // Step 6: Save assistant message
         if (conversation_id) {
             const { error } = await supabase
                 .from("messages")
@@ -99,7 +125,7 @@ export async function POST(request: NextRequest) {
             if (error) console.error("Failed to save assistant message:", error);
         }
 
-        // Step 6: Return response + conversation_id
+        // Step 7: Return response + conversation_id
         return NextResponse.json({ response, conversation_id });
 
     } catch (error) {
