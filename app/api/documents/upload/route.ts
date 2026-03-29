@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { business_id, content, metadata } = body
+    const { business_id, content, title, metadata } = body
 
     if (!business_id || !content) {
       return NextResponse.json(
@@ -42,7 +42,12 @@ export async function POST(req: NextRequest) {
     // Store document in Supabase
     const { data, error } = await supabase
       .from('documents')
-      .insert({ business_id, content, embedding, metadata: metadata ?? null })
+      .insert({
+          business_id,
+          content,
+          embedding,
+          metadata: { ...(metadata ?? {}), ...(title ? { title } : {}) } || null,
+        })
       .select('id')
       .single()
 
