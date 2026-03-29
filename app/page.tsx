@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, FormEvent } from "react";
+import { supabase } from "@/lib/supabase";
 
 type Message = {
   role: "user" | "assistant";
@@ -12,6 +13,8 @@ export default function ChatTestingPage() {
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [businesses, setBusinesses] = useState<{ id: string; name: string }[]>([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -22,6 +25,19 @@ export default function ChatTestingPage() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    const fetchBusinesses = async () => {
+      const { data, error } = await supabase.from("businesses").select("id, name");
+      if (!error && data) {
+        setBusinesses(data);
+        if (data.length > 0) {
+          setSelectedBusinessId(data[0].id);
+        }
+      }
+    };
+    fetchBusinesses();
+  }, []);
+
   const handleSend = async (e?: FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -30,6 +46,21 @@ export default function ChatTestingPage() {
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
     setIsLoading(true);
+
+    let currentConversationId = conversationId;
+    if (!currentConversationId && selectedBusinessId) {
+      const { data, error } = await supabase
+        .from("conversations")
+        .insert({ business_id: selectedBusinessId })
+        .select("id")
+        .single();
+      if (data?.id) {
+        currentConversationId = data.id;
+        setConversationId(currentConversationId);
+      } else {
+        console.error("Failed to create conversation:", error);
+      }
+    }
 
     try {
       const response = await fetch("/api/chat", {
@@ -40,7 +71,7 @@ export default function ChatTestingPage() {
         },
         body: JSON.stringify({
           message: userMessage,
-          conversation_id: conversationId,
+          conversation_id: currentConversationId,
         }),
       });
 
@@ -77,6 +108,11 @@ export default function ChatTestingPage() {
     setInput("");
   };
 
+  const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedBusinessId(e.target.value);
+    startNewConversation();
+  };
+
   return (
     <div className="flex flex-col h-screen bg-zinc-50 dark:bg-zinc-950 font-sans text-zinc-900 dark:text-zinc-100">
       {/* Header */}
@@ -91,12 +127,30 @@ export default function ChatTestingPage() {
             <span className="text-xs text-zinc-500 font-mono">New Session</span>
           )}
         </div>
-        <button
-          onClick={startNewConversation}
-          className="px-4 py-2 text-sm font-medium bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-md transition-colors"
-        >
-          New Conversation
-        </button>
+        <div className="flex items-center space-x-4">
+          <select
+            value={selectedBusinessId || ""}
+            onChange={handleBusinessChange}
+            className="px-3 py-1.5 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[150px]"
+            disabled={isLoading || businesses.length === 0}
+          >
+            {businesses.length === 0 ? (
+              <option value="">Loading...</option>
+            ) : (
+              businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))
+            )}
+          </select>
+          <button
+            onClick={startNewConversation}
+            className="px-4 py-2 text-sm font-medium bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-md transition-colors"
+          >
+            New Conversation
+          </button>
+        </div>
       </header>
 
       {/* Messages */}

@@ -108,7 +108,48 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Step 5: Call Groq with full history (system prompt always first)
+        // Step 5: RAG — embed user message and retrieve relevant documents
+        if (business_id) {
+            try {
+                const embedRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'models/gemini-embedding-001',
+                            content: { parts: [{ text: message }] },
+                            outputDimensionality: 768,
+                        }),
+                    }
+                )
+
+                if (embedRes.ok) {
+                    const embedData = await embedRes.json()
+                    const queryEmbedding: number[] = embedData.embedding.values
+
+                    const { data: docs } = await supabase.rpc('match_documents', {
+                        query_embedding: queryEmbedding,
+                        match_count: 3,
+                        match_business_id: business_id,
+                    })
+
+                    if (docs && docs.length > 0) {
+                        const docBlock = docs
+                            .map((d: { content: string }) => `---\n${d.content}`)
+                            .join('\n')
+                        systemPrompt =
+                            `${systemPrompt}\n\nUse the following business information to answer the customer's question. If the information doesn't cover their question, say you'll check and get back to them.\n\n${docBlock}\n---`
+                    }
+                } else {
+                    console.error('Gemini embedding failed during RAG:', await embedRes.text())
+                }
+            } catch (ragError) {
+                console.error('RAG step failed, continuing without context:', ragError)
+            }
+        }
+
+        // Step 6: Call Groq with full history (system prompt always first)
         const completion = await groq.chat.completions.create({
             messages: [{ role: "system", content: systemPrompt }, ...groqMessages],
             model: "llama-3.3-70b-versatile",
@@ -116,7 +157,7 @@ export async function POST(request: NextRequest) {
 
         const response = completion.choices[0]?.message?.content || "";
 
-        // Step 6: Save assistant message
+        // Step 7: Save assistant message
         if (conversation_id) {
             const { error } = await supabase
                 .from("messages")
@@ -125,7 +166,7 @@ export async function POST(request: NextRequest) {
             if (error) console.error("Failed to save assistant message:", error);
         }
 
-        // Step 7: Return response + conversation_id
+        // Step 8: Return response + conversation_id
         return NextResponse.json({ response, conversation_id });
 
     } catch (error) {
