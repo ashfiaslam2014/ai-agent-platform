@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
           business_id,
           content,
           embedding,
-          metadata: { ...(metadata ?? {}), ...(title ? { title } : {}) } || null,
+          metadata: { ...(metadata ?? {}), ...(title ? { title } : {}) },
         })
       .select('id')
       .single()
