@@ -70,9 +70,9 @@ export async function POST(request: NextRequest) {
             if (error) console.error("Failed to save user message:", error);
         }
 
-        // Step 3: Build message history for Groq
-        type GroqMessage = { role: "system" | "user" | "assistant"; content: string };
-        let groqMessages: GroqMessage[] = [];
+        // Step 3: Build message history
+        type ChatMessage = { role: "user" | "assistant"; content: string };
+        let chatMessages: ChatMessage[] = [];
 
         if (conversation_id && incomingConversationId) {
             const { data: history, error } = await supabase
@@ -85,12 +85,12 @@ export async function POST(request: NextRequest) {
             if (error) {
                 console.error("Failed to fetch conversation history:", error);
             } else if (history) {
-                groqMessages = history as GroqMessage[];
+                chatMessages = history as ChatMessage[];
             }
         }
 
         // Append current user message (already saved above)
-        groqMessages.push({ role: "user", content: message });
+        chatMessages.push({ role: "user", content: message });
 
         // Step 4: Fetch system prompt from businesses table
         let systemPrompt = FALLBACK_SYSTEM_PROMPT;
@@ -149,13 +149,21 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Step 6: Call Groq with full history (system prompt always first)
+        // Step 6: Call Groq with full history
+        const groqMessages: Groq.Chat.ChatCompletionMessageParam[] = [
+            { role: "system", content: systemPrompt },
+            ...chatMessages.map(m => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+            })),
+        ];
+
         const completion = await groq.chat.completions.create({
-            messages: [{ role: "system", content: systemPrompt }, ...groqMessages],
             model: "llama-3.3-70b-versatile",
+            messages: groqMessages,
         });
 
-        const response = completion.choices[0]?.message?.content || "";
+        const response = completion.choices[0]?.message?.content ?? "";
 
         // Step 7: Save assistant message
         if (conversation_id) {
