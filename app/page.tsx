@@ -28,7 +28,9 @@ export default function ChatTestingPage() {
   useEffect(() => {
     const fetchBusinesses = async () => {
       const { data, error } = await supabase.from("businesses").select("id, name");
-      if (!error && data) {
+      if (error) {
+        console.error("Failed to fetch businesses:", error);
+      } else if (data) {
         setBusinesses(data);
         if (data.length > 0) {
           setSelectedBusinessId(data[0].id);
