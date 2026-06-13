@@ -59,13 +59,20 @@ export async function POST(req: NextRequest) {
     }
 
     // Send the AI reply back to the sender via the Meta Graph API
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+    const metaUrl = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
+    console.log('[WhatsApp debug] WHATSAPP_PHONE_NUMBER_ID:', phoneNumberId)
+    console.log('[WhatsApp debug] WHATSAPP_ACCESS_TOKEN (first 20):', accessToken?.slice(0, 20))
+    console.log('[WhatsApp debug] Meta API URL:', metaUrl)
+
     const metaRes = await fetch(
-      `https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      metaUrl,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
