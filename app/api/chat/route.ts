@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
             const { data: firstBusiness } = await supabase
                 .from("businesses")
                 .select("id")
+                .order("created_at", { ascending: true })
                 .limit(1)
                 .single();
 

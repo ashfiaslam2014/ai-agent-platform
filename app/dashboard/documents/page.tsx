@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import NavBar from "@/components/NavBar";
 
 type Business = {
   id: string;
@@ -192,8 +193,10 @@ export default function DocumentManagementPage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-zinc-50 dark:bg-zinc-950 font-sans text-zinc-900 dark:text-zinc-100 p-6 max-w-7xl mx-auto w-full">
-      <header className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="flex flex-col min-h-screen bg-zinc-50 dark:bg-zinc-950 font-sans text-zinc-900 dark:text-zinc-100">
+      <NavBar />
+      <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
+        <header className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
           Document Management
         </h1>
@@ -346,6 +349,7 @@ export default function DocumentManagementPage() {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

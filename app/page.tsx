@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import { supabase } from "@/lib/supabase";
+import NavBar from "@/components/NavBar";
 
 type Message = {
   role: "user" | "assistant";
@@ -117,6 +118,7 @@ export default function ChatTestingPage() {
 
   return (
     <div className="flex flex-col h-screen bg-zinc-50 dark:bg-zinc-950 font-sans text-zinc-900 dark:text-zinc-100">
+      <NavBar />
       {/* Header */}
       <header className="flex-none flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
         <div>
