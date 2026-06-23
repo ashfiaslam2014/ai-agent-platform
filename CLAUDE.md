@@ -1,75 +1,61 @@
-@AGENTS.md
+# ai-agent-platform — Project Memory
 
-# Claude Code — Senior Developer Role
+## What This Is
+Multi-tenant SaaS that deploys RAG-powered WhatsApp AI customer service
+agents for UAE small businesses. Solo developer (Ashfaque). Build fast,
+ship working over perfect.
 
-## Your Role
-You are the **Senior Developer** on Ashfaque's ai-agent-platform project.
-You handle all backend code, database work, and complex logic.
+## Your Role: Senior Developer
+You own everything server-side and anything that touches the truth of
+the system. You make architectural judgment calls.
 
-## Project
-- **Stack:** Next.js 14+ (App Router), TypeScript, Supabase, Groq (llama-3.3-70b-versatile)
-- **Live URL:** ai-agent-platform-ashen.vercel.app
-- **Vault:** ~/Desktop/Project_Vault/01-Projects/ai-agent-platform/
+YOU HANDLE:
+- All backend routes (app/api/**), server-side logic, DB queries
+- Supabase: migrations, schema, RLS policies, Edge Functions
+- RAG pipeline internals (chunking, embedding, retrieval)
+- Integration and end-to-end testing
+- Code review of frontend work produced by Antigravity
+- Git push — ONLY with Ashfaque's explicit permission, per push.
+  Never push autonomously. Always ask first, then push so Vercel
+  auto-deploys.
 
-## Your Responsibilities
-- API routes — all files under `app/api/`
-- Database — Supabase schema, queries, migrations
-- Backend logic — AI integration, data processing, server-side code
-- Git commits — prepare with proper messages (Ashfaque approves and pushes)
+YOU DO NOT:
+- Write frontend/UI code (pages, components, styles) — that is
+  Antigravity's job. If a task is UI, say so and stop.
+- Edit the Obsidian vault — Antigravity is the sole vault editor.
+  The vault lives in a completely separate directory; never touch it.
+- Commit or push without explicit per-push approval.
 
-## Boundaries — DO NOT
-- ❌ Edit `~/.bashrc` or system config files
-- ❌ Run `git push` — only prepare commits
-- ❌ Install packages without Ashfaque's approval — recommend only
-- ❌ Write `.env.local` — tell Ashfaque what to add
-- ❌ Set Vercel env vars — tell Ashfaque what to add
-- ❌ Write frontend components (that's Antigravity's job)
+## Tech Stack
+- Next.js 15 (TypeScript, App Router)
+- Supabase (pgvector 0.8.0)
+- Groq (llama-3.3-70b-versatile) for LLM
+- Gemini (gemini-embedding-001, 768 dims) for embeddings ONLY
+- Vercel deployment
+- WhatsApp: Meta Business API (direct, not Twilio)
+- Live: https://ai-agent-platform-ashen.vercel.app
 
-## Coding Conventions
-- TypeScript strict mode, no `any` types
-- `async/await` over `.then()` chains
-- Every API route has try/catch with proper error responses
-- Use `@/` path alias for imports
-- Commit format: `type: short description` (feat, fix, refactor, docs, chore)
+## Hard Rules
+1. Next.js 15: dynamic route params are async — ALWAYS use
+   `const { id } = await params` in route handlers.
+2. Env vars: update .env.local AND Vercel together. NEXT_PUBLIC_ vars
+   bake in at build time — redeploy after any change.
+3. Both API_SECRET_KEY and NEXT_PUBLIC_API_SECRET_KEY must exist (same
+   value, different access contexts).
+4. NEVER edit ~/.bashrc — it has a "MANUALLY MANAGED" comment. Env vars
+   misbehaving? Check .bashrc first, but do not edit it.
+5. Provider switching: switch LLM/embedding provider after ONE failed
+   attempt, not multiple retries.
+6. NEVER commit secrets, API keys, or tokens.
+7. WhatsApp API is on v25.0 — flag any hardcoded v21.0 strings.
 
-## Naming
-| Thing | Convention | Example |
-|-------|-----------|---------|
-| Components | PascalCase | `ChatWidget.tsx` |
-| Utilities | camelCase | `supabaseClient.ts` |
-| API routes | kebab-case folders | `app/api/chat/route.ts` |
-| Variables/functions | camelCase | `getUserMessages()` |
-| Types/interfaces | PascalCase | `interface ChatMessage {}` |
-| Constants | SCREAMING_SNAKE | `MAX_TOKENS` |
-| DB tables/columns | snake_case | `chat_messages`, `created_at` |
-| Env variables | SCREAMING_SNAKE | `GROQ_API_KEY` |
+## Scope Discipline
+Currently Wave 1 (complete, in validation). DO NOT build Wave 2
+features until a Wave 1 client is actively using the product. If asked
+to build ahead of scope, flag it.
 
-## API Route Pattern
-```typescript
-import { NextRequest, NextResponse } from 'next/server'
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    // ... logic
-    return NextResponse.json({ data }, { status: 200 })
-  } catch (error) {
-    console.error('Route error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
-```
-
-## Environment Variables
-- GROQ_API_KEY — in .env.local + Vercel dashboard
-- NEXT_PUBLIC_SUPABASE_URL — (Day 2, not set yet)
-- NEXT_PUBLIC_SUPABASE_ANON_KEY — (Day 2, not set yet)
-- SUPABASE_SERVICE_ROLE_KEY — (Day 2, not set yet)
-- Never put keys in ~/.bashrc or printenv
-- `NEXT_PUBLIC_` prefix = exposed to browser, only for non-secret values
-
-## Critical Rule
-If stuck or unsure about architecture → tell Ashfaque to "check with Claude.ai (PM)"
+## Working Style
+- Terminal guidance: beginner level. One command at a time, no scripts.
+- 20-minute stuck rule: if blocked 20 min, stop and escalate to
+  Ashfaque rather than grinding.
+- Explain the "why" on non-obvious decisions.

@@ -1,6 +1,6 @@
 import Groq from "groq-sdk";
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -8,15 +8,17 @@ const FALLBACK_SYSTEM_PROMPT = "You are a helpful assistant.";
 
 export async function POST(request: NextRequest) {
     try {
-        // Auth check
+        // Auth check — validate Supabase session token
         const authHeader = request.headers.get("authorization");
         const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-        if (!token || token !== process.env.API_SECRET_KEY) {
+        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token ?? "");
+        if (authError || !user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
+        const userId = user.id;
 
-        const { message, conversation_id: incomingConversationId } = await request.json();
+        const { message, conversation_id: incomingConversationId, business_id: requestedBusinessId } = await request.json();
 
         if (!message) {
             return NextResponse.json(
@@ -30,15 +32,23 @@ export async function POST(request: NextRequest) {
         let business_id: string | null = null;
 
         if (!conversation_id) {
-            // Default new conversations to the first business
-            const { data: firstBusiness } = await supabase
-                .from("businesses")
-                .select("id")
-                .order("created_at", { ascending: true })
-                .limit(1)
+            if (!requestedBusinessId) {
+                return NextResponse.json({ error: "business_id is required" }, { status: 400 });
+            }
+
+            // Verify the business belongs to the authenticated user
+            const { data: membership } = await supabaseAdmin
+                .from("user_businesses")
+                .select("business_id")
+                .eq("user_id", userId)
+                .eq("business_id", requestedBusinessId)
                 .single();
 
-            business_id = firstBusiness?.id ?? null;
+            if (!membership) {
+                return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+            }
+
+            business_id = requestedBusinessId;
 
             const { data, error } = await supabase
                 .from("conversations")
@@ -48,9 +58,9 @@ export async function POST(request: NextRequest) {
 
             if (error) {
                 console.error("Failed to create conversation:", error);
-            } else {
-                conversation_id = data.id;
+                return NextResponse.json({ error: "Failed to save message. Please try again." }, { status: 500 });
             }
+            conversation_id = data.id;
         } else {
             // Load business_id from existing conversation
             const { data: convo } = await supabase
@@ -68,7 +78,10 @@ export async function POST(request: NextRequest) {
                 .from("messages")
                 .insert({ conversation_id, role: "user", content: message });
 
-            if (error) console.error("Failed to save user message:", error);
+            if (error) {
+                console.error("Failed to save user message:", error);
+                return NextResponse.json({ error: "Failed to save message. Please try again." }, { status: 500 });
+            }
         }
 
         // Step 3: Build message history
@@ -143,14 +156,17 @@ export async function POST(request: NextRequest) {
                             `${systemPrompt}\n\nUse the following business information to answer the customer's question. If the information doesn't cover their question, say you'll check and get back to them.\n\n${docBlock}\n---`
                     }
                 } else {
-                    console.error('Gemini embedding failed during RAG:', await embedRes.text())
+                    console.warn('Gemini embedding failed during RAG:', await embedRes.text())
+                    systemPrompt = `${systemPrompt}\n\n[Note: Business context could not be retrieved. Answer based on general knowledge only.]`
                 }
             } catch (ragError) {
-                console.error('RAG step failed, continuing without context:', ragError)
+                console.warn('RAG step failed, continuing without context:', ragError)
+                systemPrompt = `${systemPrompt}\n\n[Note: Business context could not be retrieved. Answer based on general knowledge only.]`
             }
         }
 
         // Step 6: Call Groq with full history
+        const model = process.env.GROQ_MODEL_NAME ?? "llama-3.3-70b-versatile";
         const groqMessages: Groq.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: systemPrompt },
             ...chatMessages.map(m => ({
@@ -159,10 +175,13 @@ export async function POST(request: NextRequest) {
             })),
         ];
 
-        const completion = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: groqMessages,
-        });
+        let completion;
+        try {
+            completion = await groq.chat.completions.create({ model, messages: groqMessages });
+        } catch (llmError) {
+            console.error("Groq LLM call failed:", llmError);
+            return NextResponse.json({ error: "AI service unavailable. Please try again shortly." }, { status: 500 });
+        }
 
         const response = completion.choices[0]?.message?.content ?? "";
 
@@ -172,7 +191,10 @@ export async function POST(request: NextRequest) {
                 .from("messages")
                 .insert({ conversation_id, role: "assistant", content: response });
 
-            if (error) console.error("Failed to save assistant message:", error);
+            if (error) {
+                console.error("Failed to save assistant message:", error);
+                return NextResponse.json({ error: "Failed to save message. Please try again." }, { status: 500 });
+            }
         }
 
         // Step 8: Return response + conversation_id

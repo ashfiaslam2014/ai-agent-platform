@@ -50,31 +50,20 @@ export default function ChatTestingPage() {
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
     setIsLoading(true);
 
-    let currentConversationId = conversationId;
-    if (!currentConversationId && selectedBusinessId) {
-      const { data, error } = await supabase
-        .from("conversations")
-        .insert({ business_id: selectedBusinessId })
-        .select("id")
-        .single();
-      if (data?.id) {
-        currentConversationId = data.id;
-        setConversationId(currentConversationId);
-      } else {
-        console.error("Failed to create conversation:", error);
-      }
-    }
-
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           message: userMessage,
-          conversation_id: currentConversationId,
+          conversation_id: conversationId ?? undefined,
+          business_id: selectedBusinessId,
         }),
       });
 

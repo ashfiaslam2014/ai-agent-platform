@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
 import NavBar from "@/components/NavBar";
 
 type Business = {
@@ -100,11 +101,14 @@ export default function BusinessesPage() {
     if (!newName.trim()) return;
     setIsAdding(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+
       const res = await fetch("/api/businesses", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY ?? ""}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ name: newName.trim(), system_prompt: newPrompt.trim() }),
       });
