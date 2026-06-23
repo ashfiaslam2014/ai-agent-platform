@@ -1,6 +1,6 @@
 import Groq from "groq-sdk";
 import { NextRequest, NextResponse } from "next/server";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { supabase, getSupabaseAdmin } from "@/lib/supabase";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
         const authHeader = request.headers.get("authorization");
         const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-        const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token ?? "");
+        const { data: { user }, error: authError } = await getSupabaseAdmin().auth.getUser(token ?? "");
         if (authError || !user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Verify the business belongs to the authenticated user
-            const { data: membership } = await supabaseAdmin
+            const { data: membership } = await getSupabaseAdmin()
                 .from("user_businesses")
                 .select("business_id")
                 .eq("user_id", userId)
