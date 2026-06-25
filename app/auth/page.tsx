@@ -36,8 +36,8 @@ export default function AuthPage() {
       } else {
         setError("Could not establish session. Please try again.");
       }
-    } catch (err: any) {
-      setError(err?.message || "An unexpected error occurred.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }
@@ -65,8 +65,8 @@ export default function AuthPage() {
       } else {
         setMessage("Check your email for the confirmation link!");
       }
-    } catch (err: any) {
-      setError(err?.message || "An unexpected error occurred.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }

@@ -23,6 +23,12 @@ type Conversation = {
   messages: Message[];
 };
 
+type RawConversation = {
+  id: string;
+  created_at: string;
+  messages: Message[] | null;
+};
+
 export default function ConversationHistoryPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null);
@@ -75,7 +81,7 @@ export default function ConversationHistoryPage() {
 
       if (!error && data) {
         // Sort messages in each conversation chronologically
-        const processedConversations = data.map((conv: any) => {
+        const processedConversations = data.map((conv: RawConversation) => {
           const sortedMessages = [...(conv.messages || [])].sort(
             (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import NavBar from "@/components/NavBar";
 
@@ -13,7 +13,7 @@ type Document = {
   id: string;
   business_id: string;
   content: string | null;
-  metadata: any;
+  metadata: Record<string, unknown>;
   created_at: string;
 };
 
@@ -51,7 +51,7 @@ export default function DocumentManagementPage() {
     fetchBusinesses();
   }, []);
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     if (!selectedBusinessId) return;
     setIsLoading(true);
     const { data, error } = await supabase
@@ -66,11 +66,11 @@ export default function DocumentManagementPage() {
       console.error("Failed to fetch documents:", error);
     }
     setIsLoading(false);
-  };
+  }, [selectedBusinessId]);
 
   useEffect(() => {
     fetchDocuments();
-  }, [selectedBusinessId]);
+  }, [selectedBusinessId, fetchDocuments]);
 
   const handleBusinessChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedBusinessId(e.target.value);
@@ -170,7 +170,7 @@ export default function DocumentManagementPage() {
   };
 
   const getDisplayTitle = (doc: Document) => {
-    const metaTitle = doc.metadata?.title;
+    const metaTitle = (doc.metadata as { title?: string })?.title;
     if (metaTitle && metaTitle.trim() !== "") return metaTitle;
     if (doc.content) {
       return doc.content.length > 50 ? doc.content.slice(0, 50) + "..." : doc.content;
