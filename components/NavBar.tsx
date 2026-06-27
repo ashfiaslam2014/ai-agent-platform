@@ -2,9 +2,22 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 
 export default function NavBar() {
   const pathname = usePathname();
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    setIsDark(document.documentElement.classList.contains("dark"));
+  }, []);
+
+  function toggleTheme() {
+    const willBeDark = !isDark;
+    document.documentElement.classList.toggle("dark", willBeDark);
+    localStorage.setItem("theme", willBeDark ? "dark" : "light");
+    setIsDark(willBeDark);
+  }
 
   const links = [
     { name: "Chat", href: "/chat" },
@@ -48,7 +61,16 @@ export default function NavBar() {
               })}
             </div>
           </div>
-          
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle theme"
+              className="flex items-center justify-center w-9 h-9 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              {isDark ? "☀️" : "🌙"}
+            </button>
+
           {/* Mobile links */}
           <div className="flex md:hidden items-center gap-4">
             {links.map((link) => {
@@ -70,6 +92,7 @@ export default function NavBar() {
                 </Link>
               );
             })}
+          </div>
           </div>
         </div>
       </div>
