@@ -99,18 +99,29 @@ RPCs: `match_documents` (recreated), `daily_conversation_volume`.
 
 `/dashboard/skills` · `/dashboard/traces` · `/dashboard/prompts` · `/dashboard/analytics`
 
-## Curriculum coverage
+## Curriculum coverage (after both build passes)
 
-| Phase | Built this session |
-|-------|--------------------|
+| Phase | State |
+|-------|-------|
 | 1 Skills & Harness | ✅ complete in code (pending your live WhatsApp test) |
-| 2 Business Actions | Booking ✅ · CRM ✅ (data+skill) · Notifications & Documents ⚠️ partial |
-| 3 Intelligence | Prompt mgmt ✅ · Eval ✅ · Analytics ✅ · advanced memory ✗ |
-| 4 Channels | Web widget ✅ · Voice/Vision/Arabic-dialect ✗ |
-| 5 Hardening | Autonomous foundation only; RBAC/Security/MCP/Payments/Workflow/Scraping ✗ |
+| 2 Business Actions | Booking ✅ (create + cancel) · CRM ✅ (skill + dashboard) · Notifications ✅ (confirm/cancel/reminder cron) · Documents ⚠️ HTML only, PDF is a seam |
+| 3 Intelligence | Prompt mgmt ✅ · Eval ✅ · Analytics ✅ · long-term contact memory ✅ |
+| 4 Channels | Web widget ✅ · Image (Gemini vision) ✅ · Voice notes in (Whisper) ✅ · spoken replies ✗ · Arabic = script detect only |
+| 5 Hardening | MCP ✅ · web-scrape→RAG ✅ (basic) · auth+audit ⚠️ new routes only · autonomous foundation only · Stripe ✗ · onboarding wizard ✗ |
 
-Full per-module detail + approach notes for the ✗ items: `MODULE_STATUS.md`.
-Everything you need to do: `USER_ACTIONS_SPEC.md`. How to use it: `USE_CASES.md`.
+Full per-module detail: `MODULE_STATUS.md`. What you must do: `USER_ACTIONS_SPEC.md`.
+How it works + every tuning knob: `RUN_THROUGH.md`. Scenarios: `USE_CASES.md`.
+
+## Second build pass added
+
+Skills: `cancel_booking`, `remember_fact`, `ingest_url`.
+`lib/channels/whatsapp-media.ts` (image→Gemini, voice→Whisper), webhook wired.
+`lib/intelligence/memory.ts` + `contact_memory` table + auto-recall in the harness.
+`lib/auth.ts` (`requireBusinessAccess`, `writeAudit`) on skills/prompts/leads/bookings routes.
+`app/api/mcp/route.ts` (MCP-over-HTTP). `app/api/cron/booking-reminders` + `vercel.json`.
+Dashboard: `/dashboard/leads`, `/dashboard/bookings`; Businesses page gains
+phone_number_id / hours / timezone / public_key fields.
+Migration `006` (contact_memory, audit_log, bookings.reminder_sent) applied via MCP.
 
 ## Verification done this session
 

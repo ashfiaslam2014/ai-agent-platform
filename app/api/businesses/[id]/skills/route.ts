@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { ensureSkillsRegistered, allSkills } from '@/lib/skills'
+import { requireBusinessAccess, writeAudit } from '@/lib/auth'
 
 /** GET — every known skill, merged with this business's enable/config state. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -33,6 +34,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 /** PUT — upsert one skill's state. Body: { skill_name, enabled, config? } */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const gate = await requireBusinessAccess(req, id)
+  if (!gate.ok) return gate.response
+
   const { skill_name, enabled, config } = await req.json()
   if (!skill_name) return NextResponse.json({ error: 'skill_name required' }, { status: 400 })
 
@@ -50,5 +54,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     )
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await writeAudit({
+    businessId: id,
+    actor: gate.email,
+    action: 'skill.toggle',
+    target: skill_name,
+    meta: { enabled: enabled ?? true },
+  })
   return NextResponse.json({ ok: true })
 }

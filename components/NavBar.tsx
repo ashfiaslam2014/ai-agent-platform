@@ -2,15 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export default function NavBar() {
   const pathname = usePathname();
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    setIsDark(document.documentElement.classList.contains("dark"));
-  }, []);
+  const [isDark, setIsDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  );
 
   function toggleTheme() {
     const willBeDark = !isDark;
@@ -27,6 +25,8 @@ export default function NavBar() {
     { name: "Skills", href: "/dashboard/skills" },
     { name: "Traces", href: "/dashboard/traces" },
     { name: "Prompts", href: "/dashboard/prompts" },
+    { name: "Leads", href: "/dashboard/leads" },
+    { name: "Bookings", href: "/dashboard/bookings" },
     { name: "Analytics", href: "/dashboard/analytics" },
   ];
 

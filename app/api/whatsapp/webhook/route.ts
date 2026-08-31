@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { runAgentForBusiness } from '@/lib/harness/server'
+import { downloadWhatsAppMedia, transcribeAudio, describeImage } from '@/lib/channels/whatsapp-media'
 
 const WHATSAPP_API_VERSION = 'v25.0'
 
@@ -24,9 +25,17 @@ export async function POST(req: NextRequest) {
     if (!messageObj) return NextResponse.json({ status: 'ok' }, { status: 200 })
 
     const from: string | undefined = messageObj.from
-    const text: string | undefined = messageObj.text?.body
     const phoneNumberId: string | undefined = change?.metadata?.phone_number_id
-    if (!from || !text) return NextResponse.json({ status: 'ok' }, { status: 200 })
+    if (!from) return NextResponse.json({ status: 'ok' }, { status: 200 })
+
+    // Resolve image / voice-note messages to text so the harness only sees text.
+    const text = await messageToText(messageObj)
+    if (!text) {
+      if (messageObj.type && messageObj.type !== 'text') {
+        await sendWhatsAppReply(from, "Sorry, I couldn't read that. Could you type it out?")
+      }
+      return NextResponse.json({ status: 'ok' }, { status: 200 })
+    }
 
     const supabase = getSupabaseAdmin()
 
@@ -70,6 +79,36 @@ export async function POST(req: NextRequest) {
   }
   // Always 200 — Meta retries otherwise.
   return NextResponse.json({ status: 'ok' }, { status: 200 })
+}
+
+type InboundMessage = {
+  type?: string
+  text?: { body?: string }
+  image?: { id: string; caption?: string }
+  audio?: { id: string }
+  voice?: { id: string }
+}
+
+/** Text messages pass through; image/voice are converted. Returns '' if unusable. */
+async function messageToText(m: InboundMessage): Promise<string> {
+  if (m.text?.body) return m.text.body.trim()
+
+  if (m.type === 'image' && m.image?.id) {
+    const media = await downloadWhatsAppMedia(m.image.id)
+    if (!media) return ''
+    const desc = await describeImage(media.bytes, media.mimeType, m.image.caption ?? null)
+    if (!desc) return ''
+    return m.image.caption ? `${m.image.caption}\n\n[image the customer sent: ${desc}]` : `[image the customer sent: ${desc}]`
+  }
+
+  const audioId = m.audio?.id ?? m.voice?.id
+  if ((m.type === 'audio' || m.type === 'voice') && audioId) {
+    const media = await downloadWhatsAppMedia(audioId)
+    if (!media) return ''
+    return (await transcribeAudio(media.bytes, media.mimeType)) ?? ''
+  }
+
+  return ''
 }
 
 async function resolveBusinessId(

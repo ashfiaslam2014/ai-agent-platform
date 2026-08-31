@@ -58,6 +58,36 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_log: {
+        Row: {
+          action: string
+          actor: string | null
+          business_id: string | null
+          created_at: string
+          id: string
+          meta: Json
+          target: string | null
+        }
+        Insert: {
+          action: string
+          actor?: string | null
+          business_id?: string | null
+          created_at?: string
+          id?: string
+          meta?: Json
+          target?: string | null
+        }
+        Update: {
+          action?: string
+          actor?: string | null
+          business_id?: string | null
+          created_at?: string
+          id?: string
+          meta?: Json
+          target?: string | null
+        }
+        Relationships: []
+      }
       bookings: {
         Row: {
           business_id: string
@@ -69,6 +99,7 @@ export type Database = {
           ends_at: string
           id: string
           notes: string | null
+          reminder_sent: boolean
           service_name: string
           starts_at: string
           status: string
@@ -83,6 +114,7 @@ export type Database = {
           ends_at: string
           id?: string
           notes?: string | null
+          reminder_sent?: boolean
           service_name: string
           starts_at: string
           status?: string
@@ -97,6 +129,7 @@ export type Database = {
           ends_at?: string
           id?: string
           notes?: string | null
+          reminder_sent?: boolean
           service_name?: string
           starts_at?: string
           status?: string
@@ -160,6 +193,33 @@ export type Database = {
           public_key?: string | null
           system_prompt?: string
           timezone?: string | null
+        }
+        Relationships: []
+      }
+      contact_memory: {
+        Row: {
+          business_id: string
+          contact_id: string
+          id: string
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          business_id: string
+          contact_id: string
+          id?: string
+          key: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          business_id?: string
+          contact_id?: string
+          id?: string
+          key?: string
+          updated_at?: string
+          value?: string
         }
         Relationships: []
       }
@@ -465,6 +525,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      daily_conversation_volume: {
+        Args: { b: string; since_days: number }
+        Returns: { conversations: number; day: string }[]
+      }
       match_documents: {
         Args: {
           match_business_id: string

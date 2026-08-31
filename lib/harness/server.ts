@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from '@/lib/supabase'
 import { generateEmbedding } from '@/lib/embedding'
 import { ensureSkillsRegistered, skillsForBusiness } from '@/lib/skills'
 import { getActivePrompt } from '@/lib/intelligence/prompts'
+import { getContactByHandle, recallFacts, factsBlock } from '@/lib/intelligence/memory'
 import { runAgent } from './index'
 import { createGroqLLM } from './llm'
 import type { AgentInput, AgentOutput, RawInbound } from './types'
@@ -17,10 +18,12 @@ export async function runAgentForBusiness(raw: RawInbound): Promise<AgentOutput>
   const supabase = getSupabaseAdmin()
   const llm = createGroqLLM()
 
-  const [{ skills, configByName }, systemPrompt] = await Promise.all([
+  const [{ skills, configByName }, basePrompt, memoryBlock] = await Promise.all([
     skillsForBusiness(supabase, raw.businessId),
     resolveSystemPrompt(supabase, raw.businessId),
+    recallForContact(supabase, raw.businessId, raw.contact?.handle ?? null),
   ])
+  const systemPrompt = basePrompt + memoryBlock
 
   const makeContext = (input: AgentInput): SkillContext => ({
     businessId: input.businessId,
@@ -87,4 +90,19 @@ async function resolveSystemPrompt(
   if (active) return active
   const { data } = await supabase.from('businesses').select('system_prompt').eq('id', businessId).single()
   return (data?.system_prompt as string) || 'You are a helpful customer service assistant.'
+}
+
+async function recallForContact(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  businessId: string,
+  handle: string | null,
+): Promise<string> {
+  if (!handle) return ''
+  try {
+    const contactId = await getContactByHandle(supabase, businessId, handle)
+    if (!contactId) return ''
+    return factsBlock(await recallFacts(supabase, contactId))
+  } catch {
+    return ''
+  }
 }

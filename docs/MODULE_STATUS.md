@@ -41,9 +41,10 @@ pending your live WhatsApp test (see `USER_ACTIONS_SPEC.md`).
 | # | Module | Status | Notes |
 |---|--------|--------|-------|
 | 22 | Booking / Appointments | Working | `lib/actions/booking.ts` — slot generation from business `hours`, overlap conflict detection, `bookings` table. `create_booking` skill (check availability → confirm). |
-| 19 | Notifications | Partial | `lib/actions/notifications.ts` — WhatsApp (Meta) + email (Resend), every send logged to `notifications_log`. **Wired only to booking confirmations.** Agent-initiated reminders/follow-ups = next session. |
-| 23 | Document Generation | Partial | `lib/actions/documents.ts` — quote/invoice/receipt from line items, real AED totals, stored as print-ready HTML, served at `/documents/<id>`. **PDF output is a seam:** set `DOCUMENT_PDF_ENDPOINT` to an HTML→PDF service and `renderPdf()` uses it. |
-| 21 | CRM / Lead Management | Working (data + skill) | `lib/actions/crm.ts` — contacts (upsert by phone), leads, 5-stage pipeline. `capture_lead` skill. **No dedicated dashboard page yet** — view in Supabase or add a page (small, follows the Traces page pattern). |
+| 19 | Notifications | Working | `lib/actions/notifications.ts` — WhatsApp + email (Resend), logged. Fires on booking confirm, cancel, and a **daily reminder cron** (`app/api/cron/booking-reminders`, `vercel.json`). |
+| 22 | Booking (cont.) | Working | Adds `cancel_booking` skill (matches the caller's next confirmed booking by phone). |
+| 23 | Document Generation | Partial | `lib/actions/documents.ts` — quote/invoice/receipt, real AED totals, print-ready HTML at `/documents/<id>`. **PDF output is a seam:** set `DOCUMENT_PDF_ENDPOINT`. |
+| 21 | CRM / Lead Management | Working | `lib/actions/crm.ts` + `capture_lead` skill + **`/dashboard/leads`** (kanban by stage) and **`/dashboard/bookings`** (list + cancel). |
 
 ## Phase 3 — Intelligence & Learning
 
@@ -51,28 +52,28 @@ pending your live WhatsApp test (see `USER_ACTIONS_SPEC.md`).
 |---|--------|--------|-------|
 | 26 | Prompt Management | Working | `lib/intelligence/prompts.ts` + `/dashboard/prompts` — versioned per-business prompts, one active at a time (DB-enforced), one-click rollback. |
 | 27 | Testing & Evaluation | Working | `lib/eval/` + `scripts/eval.ts` — JSON dataset of cases, asserts on reply text + which skills fired, prints a scorecard. `eval/dataset.example.json` included. |
-| 3 | Context / Memory (advanced) | Not built | Long-term per-contact facts. Approach: a `contact_memory` table (`contact_id`, `key`, `value`, `updated_at`); a `remember_fact` skill; inject a contact's facts into the system prompt in `lib/harness/server.ts` next to the prompt lookup. ~1 session. |
+| 3 | Context / Memory (advanced) | Working | `contact_memory` table + `remember_fact` skill + auto-recall injected into the prompt in `lib/harness/server.ts` (`recallForContact`). |
 | 25 | Analytics & Reporting | Working | `lib/intelligence/analytics.ts` + `/dashboard/analytics` — conversations, replies, skill usage, avg latency, degraded rate, daily volume chart. |
 
 ## Phase 4 — Channels & Interfaces
 
 | # | Module | Status | Notes |
 |---|--------|--------|-------|
-| 8 | Web Application / widget | Working | `public/widget.js` (floating button + iframe) → `/embed/<publicKey>` chat UI → `/api/public/chat` (public-key auth, in-memory rate limit, CORS). One `<script>` tag to install. |
-| 15 | Voice Control | Not built | STT+TTS over WhatsApp voice notes. Approach: in the webhook, detect `messageObj.type === 'audio'`, download media via Meta Graph API, STT (Groq Whisper `whisper-large-v3` — already on Groq, no new vendor), run text through the harness, TTS the reply (Google TTS or ElevenLabs free tier), upload + send as audio. ~1–2 sessions. Needs: nothing new if using Groq Whisper for STT; a TTS key for spoken replies. |
-| 14 | Image Recognition | Not built | Photo queries (menu, product, damage). Approach: detect `messageObj.type === 'image'`, download media, send to a vision model (Groq `llama-3.2-90b-vision` or Gemini) with the caption as the prompt, feed the description into the harness as the user turn. ~1 session, no new vendor. |
+| 8 | Web Application / widget | Working | `public/widget.js` → `/embed/<publicKey>` → `/api/public/chat` (public-key auth, rate limit, CORS). One `<script>` tag. |
+| 15 | Voice Control | Partial | **Voice notes in:** webhook downloads the audio, Groq Whisper (`whisper-large-v3`) transcribes it, harness handles the text (`lib/channels/whatsapp-media.ts`). **Spoken replies out:** not built — needs a TTS key. |
+| 14 | Image Recognition | Working | Webhook downloads the image, Gemini vision (`gemini-2.0-flash`) describes it grounded by the caption, harness handles it as the user turn (`lib/channels/whatsapp-media.ts`). |
 | 17 | Arabic / Multilingual NLP | Partial | `detectLocale()` in `lib/harness/input.ts` (script-based en/ar/mixed) and a system-prompt instruction to reply in the customer's language. Dialect handling, transliteration, Arabic voice = later. |
 
 ## Phase 5 — Platform Hardening
 
 | # | Module | Status | Notes |
 |---|--------|--------|-------|
-| 18 | Auth & Multi-Tenancy (advanced) | Not built | RBAC, self-service onboarding. Approach: `user_businesses.role` already exists — add a `requireRole()` helper in a shared `lib/auth.ts`, gate the dashboard API routes with it (they're currently open, matching the existing Phase 0 routes). Onboarding = a `/onboard` wizard that creates the business row + `user_businesses` link + seeds `business_skills`. |
-| 28 | Security & Data Privacy | Not built | Audit log, PII handling, UAE residency. Approach: `audit_log` table (`actor`, `action`, `target`, `meta`, `at`); write to it from the dashboard mutation routes; Supabase is already in `ap-*` regions. |
-| 12 | MCP | Not built | Expose skills as MCP tools. Approach: the skill contract is already MCP-shaped (`name`/`description`/`parameters`). A thin `app/api/mcp/route.ts` speaking MCP-over-HTTP that lists `allSkills()` and dispatches `tools/call` into `skill.run()` with a service context. ~1 session. |
+| 18 | Auth & Multi-Tenancy (advanced) | Partial | `lib/auth.ts` `requireBusinessAccess()` gates the **new** dashboard mutation routes (skills, prompts, leads, bookings) — Supabase token + `user_businesses` check. Older routes (`/api/businesses*`) still open. Self-service onboarding wizard not built. |
+| 28 | Security & Data Privacy | Partial | `audit_log` table + `writeAudit()` on every gated mutation; `/dashboard` has no viewer yet (query `audit_log` in Supabase). PII handling / residency: Supabase is `ap-*`; no redaction layer. |
+| 12 | MCP | Working | `app/api/mcp/route.ts` — MCP-over-HTTP (`initialize`, `tools/list`, `tools/call`). Auth: `Bearer <API_SECRET_KEY>` + `X-Business-Id`. Skills dispatch through `validateArgs` + `skill.run()`. |
 | 13 | Autonomous Agents | Partial (foundation) | The harness already does bounded multi-step tool loops. "Autonomous" = raise `maxToolCalls`, add a planning step that writes a checklist to the trace, and a per-run cost ceiling. Extends `lib/harness/index.ts`, no new infra. |
 | 20 | Workflow Automation | Not built | n8n/Make-style triggers. Approach: a `workflows` table (trigger event + action steps as JSON) and an event bus — emit events from the harness (`booking.created`, `lead.captured`) and a runner that matches workflows. Bigger; 2–3 sessions. |
-| 24 | Web Scraping / Data Collection | Not built | Feeds RAG (menus, catalogues, competitor prices). Approach: a `scrape_url` server action (fetch + readability extract) → chunk → embed → insert into `documents`. Small standalone; ~1 session. |
+| 24 | Web Scraping / Data Collection | Working (basic) | `ingest_url` skill — fetch a URL, strip to text, chunk, embed, insert into `documents`. Extraction is a plain tag-strip (no readability lib); good enough for menu/price/policy pages. |
 | 9 | Online Payments | Not built | Stripe. Approach: `stripe` SDK, a `create_payment_link` skill (mutating, config holds the restricted key), `app/api/stripe/webhook` to mark invoices paid in `documents_generated`. ~1 session; needs a Stripe account. |
 | 16 | Mobile Application | Not built | Track 6, not part of Core Agent Build. |
 

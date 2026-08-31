@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import NavBar from "@/components/NavBar";
 import { BusinessSelect, useBusinessPicker } from "../_components/BusinessPicker";
+import { authedFetch } from "../_components/api";
 
 type SkillRow = {
   name: string;
@@ -33,9 +34,8 @@ export default function SkillsPage() {
   async function save(name: string, patch: Partial<SkillRow>) {
     setSavingName(name);
     const row = skills.find((s) => s.name === name)!;
-    await fetch(`/api/businesses/${businessId}/skills`, {
+    await authedFetch(`/api/businesses/${businessId}/skills`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         skill_name: name,
         enabled: patch.enabled ?? row.enabled,

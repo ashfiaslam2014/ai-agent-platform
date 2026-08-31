@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import NavBar from "@/components/NavBar";
 import { BusinessSelect, useBusinessPicker } from "../_components/BusinessPicker";
+import { authedFetch } from "../_components/api";
 
 type Version = { id: string; version: number; note: string | null; is_active: boolean; created_at: string };
 
@@ -31,9 +32,8 @@ export default function PromptsPage() {
   async function saveNew() {
     if (!draft.trim()) return;
     setSaving(true);
-    await fetch(`/api/businesses/${businessId}/prompts`, {
+    await authedFetch(`/api/businesses/${businessId}/prompts`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: draft, note, activate: true }),
     });
     setNote("");
@@ -42,9 +42,8 @@ export default function PromptsPage() {
   }
 
   async function activate(version: number) {
-    await fetch(`/api/businesses/${businessId}/prompts`, {
+    await authedFetch(`/api/businesses/${businessId}/prompts`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ version }),
     });
     load();

@@ -65,6 +65,7 @@ project rule, set them in **both** places and redeploy after any `NEXT_PUBLIC_` 
 | `NOTIFY_EMAIL_FROM` | 🔵 | e.g. `bookings@yourdomain.com` (must be a verified Resend domain) | email notifications |
 | `DOCUMENT_PDF_ENDPOINT` | 🔵 | URL of an HTML→PDF service (see step 7) | PDF invoices |
 | `ACTIVE_BUSINESS_ID` | 🔵 | a `businesses.id` | webhook fallback if `phone_number_id` isn't matched and no default is set |
+| `CRON_SECRET` | 🔵 | any random string | lets you manually hit `/api/cron/booking-reminders` with `Authorization: Bearer <it>`; Vercel Cron doesn't need it |
 
 **Check:** `vercel env ls` (or the dashboard) shows the new vars; redeploy done.
 
@@ -94,38 +95,23 @@ select id, name, phone_number_id, is_default, public_key from businesses;
 
 ## 4. 🟢 Per-business setup (repeat for each business)
 
-### 4.1 Link the WhatsApp number
-**Why:** inbound webhooks are routed to a business by `phone_number_id`.
-```sql
-update businesses
-set phone_number_id = '<the WhatsApp phone_number_id from Meta>'
-where id = '<business id>';
-```
-(You can also `PATCH /api/businesses/<id>` with `{"phone_number_id":"..."}` — the
-API now accepts it; a form field on the Businesses page is a fast-follow.)
-
-**Check:**
-```sql
-select name, phone_number_id from businesses where phone_number_id is not null;
-```
-
-### 4.2 Set opening hours
-**Why:** `get_business_hours` and booking slot generation read this. Day keys are
-lowercase; `"closed"` for closed days; times are `HH:MM` 24h in the business's timezone.
-```sql
-update businesses set
-  timezone = 'Asia/Dubai',
-  hours = '{
+### 4.1 + 4.2 Link the number and set hours — `/dashboard/businesses`
+Expand a business, then in the edit panel:
+- **WhatsApp phone_number_id** — from Meta. Routes inbound WhatsApp to this business.
+- **Timezone** — e.g. `Asia/Dubai`.
+- **Opening hours (JSON)** — day keys lowercase, `"closed"` for closed days,
+  `HH:MM` 24h. The panel shows the format. Example:
+  ```json
+  {
     "monday":    {"open":"09:00","close":"23:00"},
-    "tuesday":   {"open":"09:00","close":"23:00"},
-    "wednesday": {"open":"09:00","close":"23:00"},
-    "thursday":  {"open":"09:00","close":"23:00"},
     "friday":    {"open":"13:00","close":"23:59"},
-    "saturday":  {"open":"09:00","close":"23:00"},
     "sunday":    {"open":"09:00","close":"23:00"}
-  }'::jsonb
-where id = '<business id>';
-```
+  }
+  ```
+- The panel also shows the **web widget key** (`public_key`) for step 8.
+
+Save. `get_business_hours` and booking slot generation read `hours`; the webhook
+routes on `phone_number_id`.
 
 **Check:** ask the test chat "what time do you open Friday?" → answer matches.
 
@@ -136,7 +122,9 @@ where id = '<business id>';
 1. Pick the business in the top-right selector.
 2. Toggle on the skills this business should have. Rule from the plan: *only
    what they actually need.* A café: `get_business_hours`, `search_knowledge`,
-   `create_booking`. A contractor: add `capture_lead`, `generate_quote`.
+   `create_booking`, `cancel_booking`. A contractor: add `capture_lead`,
+   `generate_quote`. Owner-facing extras: `remember_fact` (agent learns
+   customer preferences), `ingest_url` (pull a web page into the knowledge base).
 3. For `create_booking`, click **Add config**:
    ```json
    { "defaultDurationMinutes": 60 }
@@ -246,25 +234,33 @@ comes back; `/dashboard/traces` shows a `web` channel trace.
 
 ---
 
+## 8b. 🔵 Booking reminders (Vercel Cron)
+
+`vercel.json` declares one daily cron (`0 9 * * *`) hitting
+`/api/cron/booking-reminders` — it WhatsApps a reminder for bookings 12–36h out.
+On Vercel **Hobby** you get 2 crons at daily granularity, so this fits. It
+activates automatically on deploy; nothing to configure. To test by hand:
+`curl -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP/api/cron/booking-reminders`.
+
 ## 9. Known gaps (decide if any block you)
 
 | Gap | Impact | Workaround now |
 |-----|--------|----------------|
-| No UI to edit `phone_number_id` / `hours` / `public_key` | must use SQL Editor | SQL snippets above |
-| Dashboard API routes have no auth check | anyone with the URL can read/write config | keep the deploy URL private; add `requireRole()` (see MODULE_STATUS.md) before onboarding a real paying client |
-| Notifications only fire on booking confirmation | no automatic reminders/follow-ups | send manually, or build the reminder job next session |
-| No CRM dashboard page | leads only visible in Supabase | `select * from leads order by created_at desc;` |
-| PDF not auto-generated | HTML only | browser "print to PDF" |
+| Older routes (`/api/businesses` GET, `/api/businesses/[id]`) have no auth check | anyone with the URL can read/edit business name + prompt | keep the deploy URL private; add `requireBusinessAccess` to those two files before a paying client |
+| No `audit_log` viewer in the dashboard | audit trail only in Supabase | `select * from audit_log order by created_at desc;` |
+| Spoken (audio) replies not built | voice notes are understood, replies come back as text | fine for most cases; add a TTS key later |
+| PDF not auto-generated | invoices are HTML | browser "print to PDF", or set `DOCUMENT_PDF_ENDPOINT` |
+| Web-page ingest uses plain tag-strip | messy sites give messy chunks | use it for clean menu/price/policy pages; upload docs for the rest |
 
 ---
 
-## 10. Fast-follow build list (for the next sessions, in priority order)
+## 10. Fast-follow build list (remaining, priority order)
 
-1. Businesses page: add `phone_number_id`, `hours` (day grid), `timezone` fields + show `public_key`.
-2. `requireRole()` auth on all dashboard API routes.
-3. CRM dashboard page (leads pipeline) + Bookings page.
-4. Agent-initiated notifications (reminder cron: bookings in next 24h).
-5. Voice notes (Groq Whisper STT — no new vendor).
-6. Image messages (vision model — no new vendor).
-7. Long-term contact memory (`contact_memory` + `remember_fact` skill).
-8. MCP endpoint exposing the skills.
+1. `requireBusinessAccess` on the two older routes (`/api/businesses` GET, `/api/businesses/[id]`).
+2. Self-service onboarding wizard (`/onboard` → create business + `user_businesses` + seed `business_skills`).
+3. Stripe: `create_payment_link` skill + `/api/stripe/webhook` (needs a Stripe account).
+4. Spoken replies: TTS on the outbound WhatsApp path (needs a TTS key).
+5. `DOCUMENT_PDF_ENDPOINT` wired + a `/documents/<id>/pdf` route.
+6. Arabic dialect / transliteration handling beyond script detection.
+7. `audit_log` viewer page.
+8. Readability-grade extraction for `ingest_url` (swap the tag-strip).
