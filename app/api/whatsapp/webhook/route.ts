@@ -1,95 +1,174 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getSupabaseAdmin } from '@/lib/supabase'
+import { runAgentForBusiness } from '@/lib/harness/server'
+import { downloadWhatsAppMedia, transcribeAudio, describeImage } from '@/lib/channels/whatsapp-media'
+
+const WHATSAPP_API_VERSION = 'v25.0'
 
 export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url)
-    const mode = searchParams.get('hub.mode')
-    const token = searchParams.get('hub.verify_token')
-    const challenge = searchParams.get('hub.challenge')
+  const { searchParams } = new URL(req.url)
+  const mode = searchParams.get('hub.mode')
+  const token = searchParams.get('hub.verify_token')
+  const challenge = searchParams.get('hub.challenge')
 
-    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-      return new NextResponse(challenge, { status: 200 })
-    }
-
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  } catch (error) {
-    console.error('WhatsApp webhook verification error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    return new NextResponse(challenge, { status: 200 })
   }
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-
-    const messageObj = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
-
-    if (!messageObj) {
-      // Status update or non-message event — nothing to process
-      return NextResponse.json({ status: 'ok' }, { status: 200 })
-    }
+    const change = body?.entry?.[0]?.changes?.[0]?.value
+    const messageObj = change?.messages?.[0]
+    if (!messageObj) return NextResponse.json({ status: 'ok' }, { status: 200 })
 
     const from: string | undefined = messageObj.from
-    const text: string | undefined = messageObj.text?.body
+    const phoneNumberId: string | undefined = change?.metadata?.phone_number_id
+    if (!from) return NextResponse.json({ status: 'ok' }, { status: 200 })
 
-    if (!from || !text) {
-      // Non-text message (image, audio, etc.) or missing sender — skip
+    // Resolve image / voice-note messages to text so the harness only sees text.
+    const text = await messageToText(messageObj)
+    if (!text) {
+      if (messageObj.type && messageObj.type !== 'text') {
+        await sendWhatsAppReply(from, "Sorry, I couldn't read that. Could you type it out?")
+      }
       return NextResponse.json({ status: 'ok' }, { status: 200 })
     }
 
-    console.log('Incoming WhatsApp message:', { from, text })
+    const supabase = getSupabaseAdmin()
 
-    // Call the internal chat endpoint
-    const baseUrl = new URL(req.url).origin
-    const chatRes = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.API_SECRET_KEY}`,
-      },
-      body: JSON.stringify({ message: text }),
+    // --- Multi-tenancy: match the inbound number to a business ---
+    const businessId = await resolveBusinessId(supabase, phoneNumberId)
+    if (!businessId) {
+      console.error('[whatsapp] no business for phone_number_id', phoneNumberId)
+      return NextResponse.json({ status: 'ok' }, { status: 200 })
+    }
+
+    // --- Conversation continuity: reuse the last convo for this contact within 24h ---
+    const conversationId = await getOrCreateConversation(supabase, businessId, from)
+
+    await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: text })
+
+    const { data: history } = await supabase
+      .from('messages')
+      .select('role, content')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .limit(40)
+
+    const priorTurns = ((history ?? []) as { role: 'user' | 'assistant'; content: string }[]).slice(0, -1)
+
+    const output = await runAgentForBusiness({
+      channel: 'whatsapp',
+      text,
+      businessId,
+      conversationId,
+      history: priorTurns,
+      contact: { handle: from, name: change?.contacts?.[0]?.profile?.name ?? null },
     })
 
-    const chatData = await chatRes.json()
-    const aiReply: string | undefined = chatData?.response
+    await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, role: 'assistant', content: output.reply })
 
-    if (!aiReply) {
-      console.error('Chat endpoint returned no response:', chatData)
-      return NextResponse.json({ status: 'ok' }, { status: 200 })
-    }
-
-    // Send the AI reply back to the sender via the Meta Graph API
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
-    const metaUrl = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`
-    console.log('[WhatsApp debug] WHATSAPP_PHONE_NUMBER_ID:', phoneNumberId)
-    console.log('[WhatsApp debug] WHATSAPP_ACCESS_TOKEN (first 20):', accessToken?.slice(0, 20))
-    console.log('[WhatsApp debug] Meta API URL:', metaUrl)
-
-    const metaRes = await fetch(
-      metaUrl,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: from,
-          type: 'text',
-          text: { body: aiReply },
-        }),
-      }
-    )
-
-    if (!metaRes.ok) {
-      console.error('Meta send message failed:', await metaRes.text())
-    }
+    await sendWhatsAppReply(from, output.reply)
   } catch (error) {
     console.error('WhatsApp webhook error:', error)
   }
-
-  // Always return 200 — Meta retries on anything else
+  // Always 200 — Meta retries otherwise.
   return NextResponse.json({ status: 'ok' }, { status: 200 })
+}
+
+type InboundMessage = {
+  type?: string
+  text?: { body?: string }
+  image?: { id: string; caption?: string }
+  audio?: { id: string }
+  voice?: { id: string }
+}
+
+/** Text messages pass through; image/voice are converted. Returns '' if unusable. */
+async function messageToText(m: InboundMessage): Promise<string> {
+  if (m.text?.body) return m.text.body.trim()
+
+  if (m.type === 'image' && m.image?.id) {
+    const media = await downloadWhatsAppMedia(m.image.id)
+    if (!media) return ''
+    const desc = await describeImage(media.bytes, media.mimeType, m.image.caption ?? null)
+    if (!desc) return ''
+    return m.image.caption ? `${m.image.caption}\n\n[image the customer sent: ${desc}]` : `[image the customer sent: ${desc}]`
+  }
+
+  const audioId = m.audio?.id ?? m.voice?.id
+  if ((m.type === 'audio' || m.type === 'voice') && audioId) {
+    const media = await downloadWhatsAppMedia(audioId)
+    if (!media) return ''
+    return (await transcribeAudio(media.bytes, media.mimeType)) ?? ''
+  }
+
+  return ''
+}
+
+async function resolveBusinessId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  phoneNumberId: string | undefined,
+): Promise<string | null> {
+  if (phoneNumberId) {
+    const { data } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('phone_number_id', phoneNumberId)
+      .maybeSingle()
+    if (data?.id) return data.id as string
+  }
+  // Fallbacks: explicit env override, then the default business.
+  if (process.env.ACTIVE_BUSINESS_ID) return process.env.ACTIVE_BUSINESS_ID
+  const { data: def } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('is_default', true)
+    .maybeSingle()
+  return (def?.id as string) ?? null
+}
+
+async function getOrCreateConversation(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  businessId: string,
+  handle: string,
+): Promise<string> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: existing } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('contact_handle', handle)
+    .gte('created_at', cutoff)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (existing?.id) return existing.id as string
+
+  const { data } = await supabase
+    .from('conversations')
+    .insert({ business_id: businessId, channel: 'whatsapp', contact_handle: handle })
+    .select('id')
+    .single()
+  return data!.id as string
+}
+
+async function sendWhatsAppReply(to: string, body: string): Promise<void> {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  if (!phoneNumberId || !accessToken) {
+    console.error('[whatsapp] missing send credentials')
+    return
+  }
+  const res = await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
+  })
+  if (!res.ok) console.error('[whatsapp] send failed:', await res.text())
 }

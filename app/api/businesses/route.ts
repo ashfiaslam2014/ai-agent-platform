@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth";
 
-// GET — list all businesses
-export async function GET() {
+// GET — list all businesses (requires a signed-in dashboard user)
+export async function GET(request: NextRequest) {
+    const gate = await requireUser(request);
+    if (!gate.ok) return gate.response;
+
     const { data, error } = await supabase
         .from("businesses")
-        .select("id, name, system_prompt, created_at")
+        .select("id, name, system_prompt, phone_number_id, timezone, hours, public_key, created_at")
         .order("created_at", { ascending: true });
 
     if (error) {

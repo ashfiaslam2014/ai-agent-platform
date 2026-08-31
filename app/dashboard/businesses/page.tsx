@@ -2,12 +2,17 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { authedFetch } from "@/app/dashboard/_components/api";
 import NavBar from "@/components/NavBar";
 
 type Business = {
   id: string;
   name: string;
   system_prompt: string;
+  phone_number_id: string | null;
+  timezone: string | null;
+  hours: Record<string, unknown> | null;
+  public_key: string | null;
   created_at: string;
 };
 
@@ -19,6 +24,9 @@ export default function BusinessesPage() {
   // Edit state
   const [editName, setEditName] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editTz, setEditTz] = useState("");
+  const [editHours, setEditHours] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ id: string; text: string; ok: boolean } | null>(null);
 
@@ -34,7 +42,7 @@ export default function BusinessesPage() {
   const fetchBusinesses = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/businesses");
+      const res = await authedFetch("/api/businesses");
       if (res.ok) {
         const data: Business[] = await res.json();
         setBusinesses(data);
@@ -57,6 +65,9 @@ export default function BusinessesPage() {
       setExpandedId(biz.id);
       setEditName(biz.name);
       setEditPrompt(biz.system_prompt ?? "");
+      setEditPhone(biz.phone_number_id ?? "");
+      setEditTz(biz.timezone ?? "Asia/Dubai");
+      setEditHours(biz.hours ? JSON.stringify(biz.hours, null, 2) : "");
       setSaveMessage(null);
     }
   };
@@ -64,11 +75,29 @@ export default function BusinessesPage() {
   const handleSave = async (id: string) => {
     setIsSaving(true);
     setSaveMessage(null);
+    let hoursValue: unknown = undefined;
+    if (editHours.trim()) {
+      try {
+        hoursValue = JSON.parse(editHours);
+      } catch {
+        setSaveMessage({ id, text: "Hours must be valid JSON", ok: false });
+        setIsSaving(false);
+        return;
+      }
+    } else {
+      hoursValue = null;
+    }
     try {
-      const res = await fetch(`/api/businesses/${id}`, {
+      const res = await authedFetch(`/api/businesses/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName, system_prompt: editPrompt }),
+        body: JSON.stringify({
+          name: editName,
+          system_prompt: editPrompt,
+          phone_number_id: editPhone,
+          timezone: editTz,
+          hours: hoursValue,
+        }),
       });
       if (res.ok) {
         setSaveMessage({ id, text: "Saved successfully", ok: true });
@@ -87,7 +116,7 @@ export default function BusinessesPage() {
   const handleSetDefault = async (id: string) => {
     setIsSettingDefault(id);
     try {
-      const res = await fetch(`/api/businesses/${id}`, { method: "PATCH" });
+      const res = await authedFetch(`/api/businesses/${id}`, { method: "PATCH" });
       if (res.ok) {
         await fetchBusinesses();
       }
@@ -287,6 +316,63 @@ export default function BusinessesPage() {
                           disabled={isSaving}
                         />
                       </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            WhatsApp phone_number_id
+                            <span className="ml-2 text-xs text-zinc-400 font-normal">(routes inbound WhatsApp to this business)</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={editPhone}
+                            onChange={(e) => setEditPhone(e.target.value)}
+                            placeholder="e.g. 123456789012345"
+                            className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            disabled={isSaving}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            Timezone
+                          </label>
+                          <input
+                            type="text"
+                            value={editTz}
+                            onChange={(e) => setEditTz(e.target.value)}
+                            placeholder="Asia/Dubai"
+                            className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            disabled={isSaving}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                          Opening hours (JSON)
+                          <span className="ml-2 text-xs text-zinc-400 font-normal">
+                            {`{"monday":{"open":"09:00","close":"18:00"},"friday":"closed"}`}
+                          </span>
+                        </label>
+                        <textarea
+                          value={editHours}
+                          onChange={(e) => setEditHours(e.target.value)}
+                          rows={6}
+                          placeholder='{\n  "monday": {"open":"09:00","close":"18:00"}\n}'
+                          className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-mono resize-y"
+                          disabled={isSaving}
+                        />
+                      </div>
+
+                      {biz.public_key && (
+                        <div className="text-xs text-zinc-500">
+                          Web widget key:{" "}
+                          <code className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 select-all">
+                            {biz.public_key}
+                          </code>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between">
                         {saveMessage?.id === biz.id ? (
                           <span
