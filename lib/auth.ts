@@ -1,42 +1,50 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 
-/**
- * Gate for dashboard mutation routes. Validates the Supabase session bearer
- * token and confirms the user is a member of `user_businesses` for the target
- * business.
- *
- * Usage:
- *   const gate = await requireBusinessAccess(req, businessId)
- *   if (!gate.ok) return gate.response
- *   // gate.userId, gate.email available
- */
-export async function requireBusinessAccess(
-  req: Request,
-  businessId: string,
-): Promise<
+type Gate =
   | { ok: true; userId: string; email: string | null }
   | { ok: false; response: NextResponse }
-> {
+
+/**
+ * Validates the Supabase session bearer token. Use for routes that need a
+ * signed-in user but have no single business to check membership against
+ * (e.g. the businesses list).
+ */
+export async function requireUser(req: Request): Promise<Gate> {
   const auth = req.headers.get('authorization')
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null
   if (!token) {
     return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
-  const supabase = getSupabaseAdmin()
   const {
     data: { user },
     error,
-  } = await supabase.auth.getUser(token)
+  } = await getSupabaseAdmin().auth.getUser(token)
   if (error || !user) {
     return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
-  const { data: membership } = await supabase
+  return { ok: true, userId: user.id, email: user.email ?? null }
+}
+
+/**
+ * Gate for dashboard mutation routes. `requireUser` plus a check that the user
+ * is a member of `user_businesses` for the target business.
+ *
+ * Usage:
+ *   const gate = await requireBusinessAccess(req, businessId)
+ *   if (!gate.ok) return gate.response
+ *   // gate.userId, gate.email available
+ */
+export async function requireBusinessAccess(req: Request, businessId: string): Promise<Gate> {
+  const gate = await requireUser(req)
+  if (!gate.ok) return gate
+
+  const { data: membership } = await getSupabaseAdmin()
     .from('user_businesses')
     .select('business_id')
-    .eq('user_id', user.id)
+    .eq('user_id', gate.userId)
     .eq('business_id', businessId)
     .maybeSingle()
 
@@ -44,7 +52,7 @@ export async function requireBusinessAccess(
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   }
 
-  return { ok: true, userId: user.id, email: user.email ?? null }
+  return gate
 }
 
 /** Best-effort audit trail for dashboard mutations. Never throws. */

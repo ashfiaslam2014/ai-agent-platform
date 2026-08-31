@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authedFetch } from "./api";
 
 export type Business = { id: string; name: string };
 
@@ -10,7 +11,7 @@ export function useBusinessPicker() {
   const [businessId, setBusinessId] = useState<string>("");
 
   useEffect(() => {
-    fetch("/api/businesses")
+    authedFetch("/api/businesses")
       .then((r) => r.json())
       .then((data: Business[]) => {
         setBusinesses(data);

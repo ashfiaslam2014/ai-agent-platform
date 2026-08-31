@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { authedFetch } from "@/app/dashboard/_components/api";
 import NavBar from "@/components/NavBar";
 
 type Business = {
@@ -41,7 +42,7 @@ export default function BusinessesPage() {
   const fetchBusinesses = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/businesses");
+      const res = await authedFetch("/api/businesses");
       if (res.ok) {
         const data: Business[] = await res.json();
         setBusinesses(data);
@@ -87,7 +88,7 @@ export default function BusinessesPage() {
       hoursValue = null;
     }
     try {
-      const res = await fetch(`/api/businesses/${id}`, {
+      const res = await authedFetch(`/api/businesses/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -115,7 +116,7 @@ export default function BusinessesPage() {
   const handleSetDefault = async (id: string) => {
     setIsSettingDefault(id);
     try {
-      const res = await fetch(`/api/businesses/${id}`, { method: "PATCH" });
+      const res = await authedFetch(`/api/businesses/${id}`, { method: "PATCH" });
       if (res.ok) {
         await fetchBusinesses();
       }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { requireBusinessAccess, writeAudit } from "@/lib/auth";
 
 // PUT — update business name and/or system_prompt
 export async function PUT(
@@ -7,6 +8,9 @@ export async function PUT(
     { params }: { params: Promise<{ id: string }> }
 ) {
     const { id } = await params;
+    const gate = await requireBusinessAccess(request, id);
+    if (!gate.ok) return gate.response;
+
     const { name, system_prompt, phone_number_id, timezone, hours } = await request.json();
 
     const updates: Record<string, unknown> = {};
@@ -31,16 +35,26 @@ export async function PUT(
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    await writeAudit({
+        businessId: id,
+        actor: gate.email,
+        action: "business.update",
+        target: id,
+        meta: { fields: Object.keys(updates) },
+    });
+
     return NextResponse.json(data);
 }
 
 // PATCH — set this business as the WhatsApp default
 // Sets its created_at to the earliest possible, pushes all others later
 export async function PATCH(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     const { id } = await params;
+    const gate = await requireBusinessAccess(request, id);
+    if (!gate.ok) return gate.response;
 
     // Set target business to epoch (guaranteed first)
     const { error: targetError } = await supabase
@@ -66,6 +80,8 @@ export async function PATCH(
     // when phone_number_id doesn't match) in sync with the UI's notion of default.
     await supabase.from("businesses").update({ is_default: false }).neq("id", id);
     await supabase.from("businesses").update({ is_default: true }).eq("id", id);
+
+    await writeAudit({ businessId: id, actor: gate.email, action: "business.set_default", target: id });
 
     return NextResponse.json({ success: true });
 }
