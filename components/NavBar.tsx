@@ -24,6 +24,10 @@ export default function NavBar() {
     { name: "Businesses", href: "/dashboard/businesses" },
     { name: "Documents", href: "/dashboard/documents" },
     { name: "Conversations", href: "/dashboard/conversations" },
+    { name: "Skills", href: "/dashboard/skills" },
+    { name: "Traces", href: "/dashboard/traces" },
+    { name: "Prompts", href: "/dashboard/prompts" },
+    { name: "Analytics", href: "/dashboard/analytics" },
   ];
 
   return (

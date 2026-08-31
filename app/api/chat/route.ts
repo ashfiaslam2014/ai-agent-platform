@@ -1,14 +1,14 @@
-import Groq from "groq-sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase, getSupabaseAdmin } from "@/lib/supabase";
+import { runAgentForBusiness } from "@/lib/harness/server";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-const FALLBACK_SYSTEM_PROMPT = "You are a helpful assistant.";
-
+/**
+ * Dashboard chat endpoint (Supabase-authenticated tester). Owns the
+ * conversation + message rows; delegates reasoning to the harness.
+ * The WhatsApp webhook and the public widget call the harness directly.
+ */
 export async function POST(request: NextRequest) {
     try {
-        // Auth check — validate Supabase session token
         const authHeader = request.headers.get("authorization");
         const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -19,192 +19,102 @@ export async function POST(request: NextRequest) {
         const userId = user.id;
 
         const { message, conversation_id: incomingConversationId, business_id: requestedBusinessId } = await request.json();
-
         if (!message) {
-            return NextResponse.json(
-                { error: "No message provided" },
-                { status: 400 }
-            );
+            return NextResponse.json({ error: "No message provided" }, { status: 400 });
         }
 
-        // Step 1: Resolve conversation_id and business_id
-        let conversation_id: string = incomingConversationId ?? null;
+        // Resolve conversation + business
+        let conversation_id: string | null = incomingConversationId ?? null;
         let business_id: string | null = null;
 
         if (!conversation_id) {
             if (!requestedBusinessId) {
                 return NextResponse.json({ error: "business_id is required" }, { status: 400 });
             }
-
-            // Verify the business belongs to the authenticated user
             const { data: membership } = await getSupabaseAdmin()
                 .from("user_businesses")
                 .select("business_id")
                 .eq("user_id", userId)
                 .eq("business_id", requestedBusinessId)
                 .single();
-
             if (!membership) {
                 return NextResponse.json({ error: "Forbidden" }, { status: 403 });
             }
-
             business_id = requestedBusinessId;
 
             const { data, error } = await supabase
                 .from("conversations")
-                .insert({ business_id })
+                .insert({ business_id, channel: "web" })
                 .select("id")
                 .single();
-
             if (error) {
                 console.error("Failed to create conversation:", error);
                 return NextResponse.json({ error: "Failed to save message. Please try again." }, { status: 500 });
             }
             conversation_id = data.id;
         } else {
-            // Load business_id from existing conversation
             const { data: convo } = await supabase
                 .from("conversations")
                 .select("business_id")
                 .eq("id", conversation_id)
                 .single();
-
             business_id = convo?.business_id ?? null;
         }
 
-        // Step 2: Save user message
-        if (conversation_id) {
+        if (!business_id || !conversation_id) {
+            return NextResponse.json({ error: "Could not resolve business for this conversation" }, { status: 400 });
+        }
+
+        // Save the user message
+        {
             const { error } = await supabase
                 .from("messages")
                 .insert({ conversation_id, role: "user", content: message });
-
             if (error) {
                 console.error("Failed to save user message:", error);
                 return NextResponse.json({ error: "Failed to save message. Please try again." }, { status: 500 });
             }
         }
 
-        // Step 3: Build message history
-        type ChatMessage = { role: "user" | "assistant"; content: string };
-        let chatMessages: ChatMessage[] = [];
+        // Prior turns (exclude the message we just inserted)
+        const { data: history } = await supabase
+            .from("messages")
+            .select("role, content")
+            .eq("conversation_id", conversation_id)
+            .order("created_at", { ascending: true })
+            .limit(50);
 
-        if (conversation_id && incomingConversationId) {
-            const { data: history, error } = await supabase
-                .from("messages")
-                .select("role, content")
-                .eq("conversation_id", conversation_id)
-                .order("created_at", { ascending: true })
-                .limit(50);
+        const priorTurns = ((history ?? []) as { role: "user" | "assistant"; content: string }[])
+            .filter((_, i, arr) => i < arr.length - 1);
 
-            if (error) {
-                console.error("Failed to fetch conversation history:", error);
-            } else if (history) {
-                chatMessages = history as ChatMessage[];
-            }
-        }
+        // Reasoning + tools + trace
+        const output = await runAgentForBusiness({
+            channel: "web",
+            text: message,
+            businessId: business_id,
+            conversationId: conversation_id,
+            history: priorTurns,
+            contact: { name: user.email ?? null, handle: null },
+        });
 
-        // Append current user message (already saved above)
-        chatMessages.push({ role: "user", content: message });
-
-        // Step 4: Fetch system prompt from businesses table
-        let systemPrompt = FALLBACK_SYSTEM_PROMPT;
-        if (business_id) {
-            const { data: business, error: businessError } = await supabase
-                .from("businesses")
-                .select("system_prompt")
-                .eq("id", business_id)
-                .single();
-
-            if (businessError) {
-                console.error("Failed to fetch business prompt:", businessError);
-            } else if (business?.system_prompt) {
-                systemPrompt = business.system_prompt;
-            }
-        }
-
-        // Step 5: RAG — embed user message and retrieve relevant documents
-        if (business_id) {
-            try {
-                const embedRes = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'models/gemini-embedding-001',
-                            content: { parts: [{ text: message }] },
-                            outputDimensionality: 768,
-                        }),
-                    }
-                )
-
-                if (embedRes.ok) {
-                    const embedData = await embedRes.json()
-                    const queryEmbedding: number[] = embedData.embedding.values
-
-                    const { data: docs } = await supabase.rpc('match_documents', {
-                        query_embedding: queryEmbedding,
-                        match_count: 3,
-                        match_business_id: business_id,
-                    })
-
-                    if (docs && docs.length > 0) {
-                        const docBlock = docs
-                            .map((d: { content: string }) => `---\n${d.content}`)
-                            .join('\n')
-                        systemPrompt =
-                            `${systemPrompt}\n\nUse the following business information to answer the customer's question. If the information doesn't cover their question, say you'll check and get back to them.\n\n${docBlock}\n---`
-                    }
-                } else {
-                    console.warn('Gemini embedding failed during RAG:', await embedRes.text())
-                    systemPrompt = `${systemPrompt}\n\n[Note: Business context could not be retrieved. Answer based on general knowledge only.]`
-                }
-            } catch (ragError) {
-                console.warn('RAG step failed, continuing without context:', ragError)
-                systemPrompt = `${systemPrompt}\n\n[Note: Business context could not be retrieved. Answer based on general knowledge only.]`
-            }
-        }
-
-        // Step 6: Call Groq with full history
-        const model = process.env.GROQ_MODEL_NAME ?? "llama-3.3-70b-versatile";
-        const groqMessages: Groq.Chat.ChatCompletionMessageParam[] = [
-            { role: "system", content: systemPrompt },
-            ...chatMessages.map(m => ({
-                role: m.role as "user" | "assistant",
-                content: m.content,
-            })),
-        ];
-
-        let completion;
-        try {
-            completion = await groq.chat.completions.create({ model, messages: groqMessages });
-        } catch (llmError) {
-            console.error("Groq LLM call failed:", llmError);
-            return NextResponse.json({ error: "AI service unavailable. Please try again shortly." }, { status: 500 });
-        }
-
-        const response = completion.choices[0]?.message?.content ?? "";
-
-        // Step 7: Save assistant message
-        if (conversation_id) {
+        // Save the assistant message
+        {
             const { error } = await supabase
                 .from("messages")
-                .insert({ conversation_id, role: "assistant", content: response });
-
+                .insert({ conversation_id, role: "assistant", content: output.reply });
             if (error) {
                 console.error("Failed to save assistant message:", error);
-                return NextResponse.json({ error: "Failed to save message. Please try again." }, { status: 500 });
             }
         }
 
-        // Step 8: Return response + conversation_id
-        return NextResponse.json({ response, conversation_id });
-
+        return NextResponse.json({
+            response: output.reply,
+            conversation_id,
+            used_skills: output.usedSkills,
+            degraded: output.degraded ?? false,
+        });
     } catch (error) {
         console.error(error);
-        return NextResponse.json(
-            { error: "Something went wrong" },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
     }
 }

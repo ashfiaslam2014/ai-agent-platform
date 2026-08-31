@@ -1,0 +1,22 @@
+[
+  {
+    "name": "asks opening hours -> uses get_business_hours",
+    "message": "what time do you open on friday?",
+    "expect": { "usesSkill": "get_business_hours" }
+  },
+  {
+    "name": "greeting -> no skill",
+    "message": "hi there",
+    "expect": { "noSkill": true }
+  },
+  {
+    "name": "wants to book -> checks availability first",
+    "message": "can I book a table for 2 tomorrow evening?",
+    "expect": { "usesSkill": "create_booking" }
+  },
+  {
+    "name": "unknown info -> promises follow-up, no invented answer",
+    "message": "do you offer helicopter tours?",
+    "expect": { "replyExcludes": ["yes we offer helicopter"] }
+  }
+]
