@@ -7,6 +7,10 @@ import { captureLeadSkill } from './builtin/capture_lead'
 import { generateQuoteSkill } from './builtin/generate_quote'
 import { rememberFactSkill } from './builtin/remember_fact'
 import { ingestUrlSkill } from './builtin/ingest_url'
+import { checkCalendarAvailabilitySkill } from './builtin/check_calendar_availability'
+import { createGoogleDocSkill } from './builtin/create_google_doc'
+import { saveDocumentToDriveSkill } from './builtin/save_document_to_drive'
+import { ingestDriveFileSkill } from './builtin/ingest_drive_file'
 
 let registered = false
 
@@ -22,6 +26,10 @@ export function ensureSkillsRegistered(): void {
     generateQuoteSkill,
     rememberFactSkill,
     ingestUrlSkill,
+    checkCalendarAvailabilitySkill,
+    createGoogleDocSkill,
+    saveDocumentToDriveSkill,
+    ingestDriveFileSkill,
   ].forEach(registerSkill)
   registered = true
 }

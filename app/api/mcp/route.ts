@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { ensureSkillsRegistered, allSkills, getSkill } from '@/lib/skills'
 import { validateArgs } from '@/lib/harness/validate'
-import type { SkillContext } from '@/lib/skills/types'
+import type { GoogleWorkspaceConfig, SkillContext } from '@/lib/skills/types'
 
 /**
  * Minimal MCP-over-HTTP server exposing the platform's skills as MCP tools.
@@ -73,12 +73,20 @@ export async function POST(req: NextRequest) {
         })
       }
 
+      const admin = getSupabaseAdmin()
+      const { data: bizGoogle } = await admin
+        .from('businesses')
+        .select('google_workspace')
+        .eq('id', businessId)
+        .single()
+
       const ctx: SkillContext = {
         businessId,
-        supabase: getSupabaseAdmin(),
+        supabase: admin,
         config: {},
         contact: { channel: 'mcp', handle: null, name: null },
         log: () => {},
+        google: (bizGoogle?.google_workspace as GoogleWorkspaceConfig) ?? null,
       }
       const result = await skill.run(check.value, ctx)
       return rpcResult(body.id, {

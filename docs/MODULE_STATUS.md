@@ -43,7 +43,7 @@ pending your live WhatsApp test (see `USER_ACTIONS_SPEC.md`).
 | 22 | Booking / Appointments | Working | `lib/actions/booking.ts` — slot generation from business `hours`, overlap conflict detection, `bookings` table. `create_booking` skill (check availability → confirm). |
 | 19 | Notifications | Working | `lib/actions/notifications.ts` — WhatsApp + email (Resend), logged. Fires on booking confirm, cancel, and a **daily reminder cron** (`app/api/cron/booking-reminders`, `vercel.json`). |
 | 22 | Booking (cont.) | Working | Adds `cancel_booking` skill (matches the caller's next confirmed booking by phone). |
-| 23 | Document Generation | Partial | `lib/actions/documents.ts` — quote/invoice/receipt, real AED totals, print-ready HTML at `/documents/<id>`. **PDF output is a seam:** set `DOCUMENT_PDF_ENDPOINT`. |
+| 23 | Document Generation | Working | `lib/actions/documents.ts` — quote/invoice/receipt, real AED totals. Public HTML at `/documents/<id>`, PDF at `/documents/<id>/pdf`. PDF uses `DOCUMENT_PDF_ENDPOINT` if set, else a bundled headless-Chromium renderer (`@sparticuz/chromium` + `puppeteer-core`) — no external service required. |
 | 21 | CRM / Lead Management | Working | `lib/actions/crm.ts` + `capture_lead` skill + **`/dashboard/leads`** (kanban by stage) and **`/dashboard/bookings`** (list + cancel). |
 
 ## Phase 3 — Intelligence & Learning
@@ -78,6 +78,25 @@ pending your live WhatsApp test (see `USER_ACTIONS_SPEC.md`).
 | 16 | Mobile Application | Not built | Track 6, not part of Core Agent Build. |
 
 ---
+
+## Google Workspace connectors (added 1 Sep 2026, branch `feat/google-workspace-connectors`)
+
+One service-account credential per business (`businesses.google_workspace` — migration
+`007`), shared by all Google skills. `lib/google/` holds `auth.ts` (JWT → token, any
+scope), `calendar.ts`, `drive.ts`, `docs.ts`. Loaded into `SkillContext.google` in
+`lib/harness/server.ts` and `app/api/mcp/route.ts`.
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| Google Calendar — write | Working | `syncBookingToCalendar` (unchanged behaviour, moved to `lib/google/calendar.ts`). Fires on booking confirm. |
+| Google Calendar — read | Working | `check_calendar_availability` skill → free/busy for a date range. |
+| Google Drive | Working | `save_document_to_drive` skill (uploads the invoice/quote PDF), `ingest_drive_file` skill (Drive Doc → knowledge base). `lib/google/drive.ts` also has `listDriveFiles`. |
+| Google Docs | Working | `create_google_doc` skill — title + body → a Doc, returns the link. `readGoogleDocText` available in `lib/google/docs.ts`. |
+| Workspace auth | Working | Service account, no per-user OAuth. `getGoogleAccessToken(json, scopes[])`. Requires the target calendar / Drive folder to be shared with the service-account email. |
+
+Needs from the user: a Google Cloud service account with Calendar + Drive + Docs APIs
+enabled, its key JSON pasted into the dashboard per business, and migration `007`
+applied. See `USER_ACTIONS_SPEC.md` §6.
 
 ## What changed in pre-existing files (kept minimal)
 

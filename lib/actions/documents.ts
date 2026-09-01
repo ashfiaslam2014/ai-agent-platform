@@ -4,9 +4,9 @@ import type { AppSupabaseClient as SupabaseClient } from '@/lib/supabase'
  * Document generation — quotes, invoices, receipts from a line-item list.
  *
  * Produces self-contained HTML (print-ready, works as a shareable link today).
- * PDF rendering is a pluggable seam: set DOCUMENT_PDF_ENDPOINT to an
- * HTML->PDF service (Gotenberg / Browserless / api2pdf) and renderPdf() will
- * use it. Until then documents are stored and served as HTML.
+ * PDF rendering: renderPdf() uses DOCUMENT_PDF_ENDPOINT if set (any HTML->PDF
+ * service that takes { html } and returns PDF bytes), otherwise falls back to a
+ * bundled headless-Chromium renderer so PDFs work with no external setup.
  */
 
 export type DocType = 'quote' | 'invoice' | 'receipt'
@@ -108,17 +108,65 @@ export async function generateDocument(
   }
 }
 
-/** HTML -> PDF via an external service. Returns null when not configured. */
+/** Fetch a stored document by id (for the public /documents/<id> routes). */
+export async function getGeneratedDocument(
+  supabase: SupabaseClient,
+  id: string,
+): Promise<{ number: string; type: DocType; html: string } | null> {
+  const { data } = await supabase
+    .from('documents_generated')
+    .select('number, type, html')
+    .eq('id', id)
+    .single()
+  if (!data) return null
+  return { number: data.number as string, type: data.type as DocType, html: data.html as string }
+}
+
+/**
+ * HTML -> PDF. Prefers DOCUMENT_PDF_ENDPOINT; otherwise renders with a bundled
+ * headless Chromium. Returns null only if both paths fail.
+ */
 export async function renderPdf(html: string): Promise<Uint8Array | null> {
   const endpoint = process.env.DOCUMENT_PDF_ENDPOINT
-  if (!endpoint) return null
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ html }),
-  })
-  if (!res.ok) return null
-  return new Uint8Array(await res.arrayBuffer())
+  if (endpoint) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html }),
+      })
+      if (res.ok) return new Uint8Array(await res.arrayBuffer())
+      console.warn('[pdf] endpoint failed, falling back to chromium:', res.status)
+    } catch (err) {
+      console.warn('[pdf] endpoint error, falling back to chromium:', err)
+    }
+  }
+  return renderPdfWithChromium(html)
+}
+
+async function renderPdfWithChromium(html: string): Promise<Uint8Array | null> {
+  try {
+    const [{ default: chromium }, { default: puppeteer }] = await Promise.all([
+      import('@sparticuz/chromium'),
+      import('puppeteer-core'),
+    ])
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    })
+    try {
+      const page = await browser.newPage()
+      await page.setContent(html, { waitUntil: 'load' })
+      const pdf = await page.pdf({ format: 'A4', printBackground: true })
+      return new Uint8Array(pdf)
+    } finally {
+      await browser.close()
+    }
+  } catch (err) {
+    console.warn('[pdf] chromium render failed:', err)
+    return null
+  }
 }
 
 function money(n: number, currency: string): string {
