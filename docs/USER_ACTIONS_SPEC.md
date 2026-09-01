@@ -44,6 +44,26 @@ Symbols: 🟢 required to go live · 🔵 optional (a feature stays off without 
 **Check:** Vercel shows a new deployment that builds green. Open the deploy URL,
 `/dashboard/skills` loads.
 
+> **Sep 2026 update:** the core build is already merged. The Google Workspace
+> connectors are on branch `feat/google-workspace-connectors` — merge that the
+> same way (`git checkout main && git merge feat/google-workspace-connectors &&
+> git push origin main`).
+
+---
+
+## 1a. 🟢 Apply pending migrations
+
+**Why:** the Google connectors need one new column.
+
+Supabase → SQL Editor, run each un-applied file in `supabase/migrations/` in
+order. Currently pending: **`007_google_workspace.sql`**
+
+```sql
+alter table businesses add column if not exists google_workspace jsonb;
+```
+
+**Check:** `select google_workspace from businesses limit 1;` runs without error.
+
 ---
 
 ## 2. 🟢 Environment variables (Vercel **and** `.env.local`)
@@ -172,47 +192,85 @@ questions for your business. Re-run after any prompt change.
 
 ---
 
-## 6. 🔵 Google Calendar sync for bookings
+## 6. 🔵 Google Workspace — Calendar, Drive, Docs (one setup for all three)
 
-**Why:** writes each confirmed booking into a Google Calendar.
+**Why:** confirmed bookings written to a Google Calendar; the agent can check
+calendar availability; generated invoices saved to Drive; the agent can create
+Google Docs and pull Drive files into the knowledge base.
 
-1. console.cloud.google.com → new project → enable **Google Calendar API**.
-2. **APIs & Services → Credentials → Create credentials → Service account.**
-   Create a JSON key, download it.
-3. Google Calendar (web) → the calendar's **Settings → Share with specific
-   people** → add the service account email (`...@...iam.gserviceaccount.com`),
-   permission **Make changes to events**.
-4. Calendar **Settings → Integrate calendar → Calendar ID** (looks like
-   `...@group.calendar.google.com`).
-5. `/dashboard/skills` → `create_booking` → **Edit config**:
-   ```json
-   {
-     "defaultDurationMinutes": 60,
-     "googleCalendarId": "xxxx@group.calendar.google.com",
-     "googleServiceAccountJson": "{ ...the entire JSON key file, as one string... }"
-   }
-   ```
-   (JSON-inside-JSON: escape the inner quotes, or paste the key file's content as
-   a single-line string.)
+**Auth model:** one **service account** (server-to-server, no per-user Google
+login). The key JSON is stored once per business in the dashboard, not in env.
 
-**Check:** make a test booking → event appears in the calendar within a few seconds.
-If not, the booking still succeeds (sync is best-effort) — check Vercel logs for `[calendar]`.
+### 6.1 Create the service account (once, ~5 min)
+
+1. **console.cloud.google.com** → create a project (e.g. `ai-agent-platform`).
+2. **APIs & Services → Library** → enable all three:
+   **Google Calendar API**, **Google Drive API**, **Google Docs API**.
+3. **APIs & Services → Credentials → Create credentials → Service account.**
+   Name it, no roles needed, **Done**.
+4. Open the service account → **Keys → Add key → Create new key → JSON** →
+   download. Note its email: `...@<project>.iam.gserviceaccount.com`.
+
+### 6.2 Share the resources with the service account
+
+- **Calendar:** Google Calendar (web) → the calendar → **Settings and sharing →
+  Share with specific people** → add the service-account email, permission
+  **Make changes to events**. Copy the **Calendar ID** from
+  *Integrate calendar* (looks like `...@group.calendar.google.com`; your
+  primary calendar's ID is your Gmail address).
+- **Drive:** create a folder (e.g. `<Business> — Agent`), right-click → **Share**
+  → add the service-account email as **Editor**. Copy the folder id from its URL
+  (`drive.google.com/drive/folders/<THIS>`).
+
+### 6.3 Put it in the dashboard
+
+Supabase → SQL Editor (until a dashboard field exists):
+
+```sql
+update businesses
+set google_workspace = jsonb_build_object(
+  'serviceAccountJson', $$ PASTE THE ENTIRE KEY FILE HERE, VERBATIM $$,
+  'calendarId',   'xxxx@group.calendar.google.com',
+  'driveFolderId','1AbC...'
+)
+where id = '<business id>';
+```
+
+`$$...$$` is Postgres dollar-quoting — it lets you paste the raw JSON key
+(with its own quotes and newlines) without escaping anything.
+
+> Requires migration `007_google_workspace.sql` (see §1a).
+
+### 6.4 Enable the skills — `/dashboard/skills`
+
+Per business, toggle on what it should have:
+`check_calendar_availability` (answering), `save_document_to_drive` (action),
+`create_google_doc` (ops), `ingest_drive_file` (ops). Booking→calendar sync
+needs no skill — it runs inside `create_booking` when `google_workspace` is set.
+
+**Check:**
+- Booking test → event appears in the calendar in a few seconds (best-effort; a
+  failed sync never blocks the booking — check Vercel logs for `[calendar]`).
+- Ask the tester "are you free tomorrow afternoon?" → it reports busy blocks.
+- `generate_quote` then `save_document_to_drive` with the returned id → a PDF
+  lands in the Drive folder.
 
 ---
 
-## 7. 🔵 PDF invoices
+## 7. 🔵 PDF invoices — works out of the box
 
-**Why:** `generate_quote` stores print-ready **HTML** today (open
-`/documents/<id>`, print to PDF from the browser). For an actual PDF file:
+`generate_quote` gives a link to `/documents/<id>` (HTML). The same document as a
+**PDF** is at `/documents/<id>/pdf`.
 
-1. Stand up an HTML→PDF service. Cheapest paths:
-   - **Gotenberg** on a free host (Docker), or
-   - a hosted API (api2pdf, PDFShift free tier).
-2. It must accept `POST { "html": "..." }` and return the PDF bytes.
-3. Set `DOCUMENT_PDF_ENDPOINT` to its URL (step 2).
+- **Default:** a bundled headless-Chromium renderer produces the PDF — nothing to
+  configure. First request after a cold start is slow (~3–5 s).
+- **Optional override:** set `DOCUMENT_PDF_ENDPOINT` to any HTML→PDF service that
+  takes `POST { "html": "..." }` and returns PDF bytes (Gotenberg, api2pdf,
+  PDFShift). When set, it's used instead of Chromium and is faster.
 
-**Check:** after wiring, `renderPdf()` returns bytes (add a `/documents/<id>/pdf`
-route to serve them — small follow-up, not built).
+**Check:** open `/documents/<id>/pdf` for any generated document → a PDF renders.
+A `502 { "error": "PDF rendering unavailable" }` means both paths failed — the
+HTML at `/documents/<id>` still works.
 
 ---
 

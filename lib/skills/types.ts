@@ -25,6 +25,17 @@ export type JSONSchemaProperty = {
 }
 
 /**
+ * One Google service-account credential per business, from
+ * businesses.google_workspace. Shared by every Google skill (calendar, drive,
+ * docs) so the key is pasted once, not per skill.
+ */
+export type GoogleWorkspaceConfig = {
+  serviceAccountJson?: string
+  calendarId?: string
+  driveFolderId?: string
+}
+
+/**
  * Everything a skill is allowed to touch. Skills never import the Supabase
  * client directly — they receive a business-scoped context so the harness
  * stays the single choke point for tenancy and logging.
@@ -39,6 +50,8 @@ export type SkillContext = {
   contact: { channel: string; handle: string | null; name: string | null }
   /** Structured logger — output lands in the agent trace. */
   log: (event: string, data?: Record<string, unknown>) => void
+  /** Business-wide Google Workspace credential; undefined when not configured. */
+  google?: GoogleWorkspaceConfig | null
 }
 
 export type SkillResult =

@@ -1,9 +1,9 @@
 import type { AppSupabaseClient as SupabaseClient } from '@/lib/supabase'
-import { syncBookingToCalendar } from './calendar'
+import { syncBookingToCalendar } from '@/lib/google/calendar'
 
 /**
  * Booking engine — slot math + conflict detection over the `bookings` table.
- * Calendar sync is best-effort and never blocks a booking (see ./calendar).
+ * Calendar sync is best-effort and never blocks a booking (see lib/google/calendar).
  */
 
 export type BookingInput = {

@@ -6,7 +6,7 @@ import { getContactByHandle, recallFacts, factsBlock } from '@/lib/intelligence/
 import { runAgent } from './index'
 import { createGroqLLM } from './llm'
 import type { AgentInput, AgentOutput, RawInbound } from './types'
-import type { SkillContext } from '@/lib/skills/types'
+import type { GoogleWorkspaceConfig, SkillContext } from '@/lib/skills/types'
 
 /**
  * Production wiring of the harness. Both /api/chat and the WhatsApp webhook
@@ -18,10 +18,11 @@ export async function runAgentForBusiness(raw: RawInbound): Promise<AgentOutput>
   const supabase = getSupabaseAdmin()
   const llm = createGroqLLM()
 
-  const [{ skills, configByName }, basePrompt, memoryBlock] = await Promise.all([
+  const [{ skills, configByName }, basePrompt, memoryBlock, googleWorkspace] = await Promise.all([
     skillsForBusiness(supabase, raw.businessId),
     resolveSystemPrompt(supabase, raw.businessId),
     recallForContact(supabase, raw.businessId, raw.contact?.handle ?? null),
+    loadGoogleWorkspace(supabase, raw.businessId),
   ])
   const systemPrompt = basePrompt + memoryBlock
 
@@ -31,6 +32,7 @@ export async function runAgentForBusiness(raw: RawInbound): Promise<AgentOutput>
     config: {},
     contact: input.contact,
     log: () => {},
+    google: googleWorkspace,
   })
 
   // Per-skill config is looked up lazily so each skill sees only its own blob.
@@ -90,6 +92,22 @@ async function resolveSystemPrompt(
   if (active) return active
   const { data } = await supabase.from('businesses').select('system_prompt').eq('id', businessId).single()
   return (data?.system_prompt as string) || 'You are a helpful customer service assistant.'
+}
+
+async function loadGoogleWorkspace(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  businessId: string,
+): Promise<GoogleWorkspaceConfig | null> {
+  try {
+    const { data } = await supabase
+      .from('businesses')
+      .select('google_workspace')
+      .eq('id', businessId)
+      .single()
+    return (data?.google_workspace as GoogleWorkspaceConfig) ?? null
+  } catch {
+    return null
+  }
 }
 
 async function recallForContact(
